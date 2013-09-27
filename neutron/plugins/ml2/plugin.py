@@ -102,7 +102,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         self.type_manager.initialize()
         self.mechanism_manager.initialize()
 
-        self._setup_rpc()
+        #self._setup_rpc()
 
         # REVISIT(rkukura): Use stevedore for these?
         self.network_scheduler = importutils.import_object(
@@ -304,8 +304,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                                                                segment)
                     db.add_network_segment(session, network_id, segment)
             else:
-                segment = self.type_manager.allocate_tenant_segment(session)
-                db.add_network_segment(session, network_id, segment)
+                #segment = self.type_manager.allocate_tenant_segment(session)
+                #db.add_network_segment(session, network_id, segment)
             self._extend_network_dict_provider(context, result)
             mech_context = driver_context.NetworkContext(self, context,
                                                          result)
