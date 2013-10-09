@@ -23,11 +23,37 @@ vespa_opts = [
                 help=_("Username for the IFC controller")),
     cfg.StrOpt('ifc_password',
                help=_("Password for the IFC controller")),
-     cfg.StrOpt('ifc_port',
+    cfg.StrOpt('ifc_port',
                help=_("Communication port for the IFC controller")),
 ]
 
 
 cfg.CONF.register_opts(vespa_opts, "vespa")
 
+class ML2MechVespaConfig(object):
+    """ML2 Mechanism Driver Vespa Configuration class."""
+    host_pools = {}
 
+    def __init__(self):
+        self._create_host_pool_dictionary()
+
+    def _create_host_pool_dictionary(self):
+        multi_parser = cfg.MultiConfigParser()
+        read_ok = multi_parser.read(cfg.CONF.config_file)
+
+        if len(read_ok) != len(cfg.CONF.config_file):
+            raise cfg.Error(_("Some config files were not parsed properly"))
+
+        for parsed_file in multi_parser.parsed:
+            for parsed_item in parsed_file.keys():
+                pool, sep, pool_id = parsed_item.partition(':')
+                if pool.lower() == 'host_pool':
+                    self.host_pools[pool_id] = {}
+                    self.host_pools[pool_id]['hosts'] = \
+                    parsed_file[parsed_item]['hosts'][0].split(',')
+
+                    self.host_pools[pool_id]['switch_ip'] = \
+                    parsed_file[parsed_item]['switch'][0]
+
+                    self.host_pools[pool_id]['port_id'] = \
+                    parsed_file[parsed_item]['port'][0]

@@ -24,12 +24,27 @@ from neutron.plugins.ml2 import driver_api as api
 LOG = log.getLogger(__name__)
 
 
+class Epg(object):
+    def __init__(self):
+        pass
+
+
+class Tenant(object):
+    def __init__(self):
+        pass
+
+
+class AppProfile(object):
+    def __init__(self):
+        pass
+
+
 class IFCManager(object):
     def __init__(self):
         # Update list of tenants from the IFC
-        self._get_ifc_tenant_list()
+        self.get_ifc_tenant_list()
 
-    def _get_ifc_tenant_list(self):
+    def get_ifc_tenant_list(self):
         """Get a list of all tenants from the IFC."""
         pass
 
@@ -41,8 +56,12 @@ class IFCManager(object):
         """
         pass
 
-    def _create_tenant_on_ifc(self, tenant_id, tenant_name):
+    def create_tenant_on_ifc(self, tenant_id, tenant_name):
         """Create an Openstack tenant on the IFC."""
+        pass
+
+    def get_epg_list_from_ifc(self):
+        """Get a list of all EPG's from the IFC"""
         pass
 
 

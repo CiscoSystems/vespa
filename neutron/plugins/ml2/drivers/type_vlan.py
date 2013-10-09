@@ -27,7 +27,9 @@ from neutron.openstack.common import log
 from neutron.plugins.common import utils as plugin_utils
 from neutron.plugins.ml2 import driver_api as api
 
+
 LOG = log.getLogger(__name__)
+
 
 TYPE_VLAN = 'vlan'
 

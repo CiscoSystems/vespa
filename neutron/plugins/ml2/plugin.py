@@ -304,6 +304,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                                                                segment)
                     db.add_network_segment(session, network_id, segment)
             else:
+                pass
                 #segment = self.type_manager.allocate_tenant_segment(session)
                 #db.add_network_segment(session, network_id, segment)
             self._extend_network_dict_provider(context, result)
