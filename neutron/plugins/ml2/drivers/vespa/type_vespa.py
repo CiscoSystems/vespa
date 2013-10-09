@@ -45,18 +45,6 @@ VLAN_MIN = 2
 VLAN_MAX = 4093
 
 
-class VespaAllocation(model_base.BASEV2):
-    """Vespa vlan allocations per pool."""
-
-    __tablename__ = 'ml2_vespa_allocations'
-
-    network_id = sa.Column(sa.String(64), nullable=False,
-                           primary_key=True)
-    vlan_id = sa.Column(sa.Integer, nullable=False, primary_key=True,
-                        autoincrement=False)
-    pool_id = sa.Column(sa.String(64), nullable=False)
-
-
 class HostPool(model_base.BASEV2):
     """Vespa host pools."""
 
@@ -70,6 +58,19 @@ class HostPool(model_base.BASEV2):
                         primary_key=False)
     port_id = sa.Column(sa.String(64), nullable=False,
                         primary_key=False)
+
+
+class VespaAllocation(model_base.BASEV2):
+    """Vespa vlan allocations per pool."""
+
+    __tablename__ = 'ml2_vespa_allocations'
+
+    network_id = sa.Column(sa.String(64), nullable=False,
+                           primary_key=True)
+    vlan_id = sa.Column(sa.Integer, nullable=False, primary_key=True,
+                        autoincrement=False)
+    pool_id = sa.Column(sa.String(255), sa.ForeignKey('ml2_vespa_hostpools.pool_id',
+                                                      ondelete="CASCADE"))
 
 
 class VespaTypeDriver(api.TypeDriver,
