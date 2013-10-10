@@ -141,7 +141,31 @@ class VespaTypeDriver(api.TypeDriver,
                 to_add.append(host)
         for host in to_add:
             self.add_host_pool(host, pool_id, switch_ip, port_id)
-            
+
+    def _check_and_allocate_segment_for_network(self, network_id, host_id):
+        session = db_api.get_session()
+        pool_id = None
+        # Check if host has a pool associated
+        host_pool = self.get_host_pool(host_id)
+        if host_pool:
+            pool_id = host_pool.pool_id
+        else:
+            raise "Host does not belong to any pool, check config"
+        
+        if pool_id:
+            # Check if network has a segment for this pool
+            seg = self.get_network_segment_per_pool(network_id, pool_id)
+
+            if seg:
+                return seg.vlan_id
+            else:
+                # Create a new segment for this network and pool
+                net = self.allocate_network_segment_per_pool(network_id,
+                                                             host_id)
+                return net.vlan_id
+
+        raise "Could not allocate segment for network"
+
     def allocate_network_segment_per_pool(self, network_id, pool_id):
         session = db_api.get_session()
         # Get a free network segment in the range specified
@@ -164,6 +188,7 @@ class VespaTypeDriver(api.TypeDriver,
                                     vlan_id=allocated_segment,
                                     pool_id=pool_id)
             session.add(alloc)
+            return alloc
         else:
             raise "No usable segment id found"
 
