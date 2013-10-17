@@ -62,7 +62,8 @@ class AgentDbMixin(ext_agent.AgentPluginBase):
 
     def _get_agent(self, context, id):
         try:
-            agent = self._get_by_id(context, Agent, id)
+            #agent = self._get_by_id(context, Agent, id)
+            agent = context.session.query(Agent).filter_by(id=id).first()
         except exc.NoResultFound:
             raise ext_agent.AgentNotFound(id=id)
         return agent

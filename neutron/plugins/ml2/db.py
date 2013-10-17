@@ -25,6 +25,7 @@ from neutron.openstack.common import uuidutils
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import models
 
+
 LOG = log.getLogger(__name__)
 
 

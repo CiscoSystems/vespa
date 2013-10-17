@@ -102,7 +102,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         self.type_manager.initialize()
         self.mechanism_manager.initialize()
 
-        #self._setup_rpc()
+        self._setup_rpc()
 
         # REVISIT(rkukura): Use stevedore for these?
         self.network_scheduler = importutils.import_object(

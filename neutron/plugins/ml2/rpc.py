@@ -27,6 +27,9 @@ from neutron.openstack.common.rpc import proxy
 from neutron.plugins.ml2 import db
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import type_tunnel
+
+from neutron.plugins.ml2.drivers.vespa.type_vespa import VespaTypeDriver
+
 # REVISIT(kmestery): Allow the type and mechanism drivers to supply the
 # mixins and eventually remove the direct dependencies on type_tunnel.
 
@@ -38,7 +41,8 @@ TAP_DEVICE_PREFIX_LENGTH = 3
 
 class RpcCallbacks(dhcp_rpc_base.DhcpRpcCallbackMixin,
                    sg_db_rpc.SecurityGroupServerRpcCallbackMixin,
-                   type_tunnel.TunnelRpcCallbackMixin):
+                   type_tunnel.TunnelRpcCallbackMixin,
+                   agents_db.AgentDbMixin):
 
     RPC_API_VERSION = '1.1'
     # history
@@ -50,6 +54,7 @@ class RpcCallbacks(dhcp_rpc_base.DhcpRpcCallbackMixin,
         # not having their own __init__ functions. If an __init__() is added
         # to one, this could break. Fix this and add a unit test to cover this
         # test in H3.
+        self.vespa = VespaTypeDriver()
         super(RpcCallbacks, self).__init__(notifier, type_manager)
 
     def create_rpc_dispatcher(self):
@@ -108,6 +113,15 @@ class RpcCallbacks(dhcp_rpc_base.DhcpRpcCallbackMixin,
                 return {'device': device}
 
             binding = db.ensure_port_binding(session, port.id)
+            seg = self.vespa._check_and_allocate_segment_for_network(port.network_id,
+                                                                     binding.host)
+            for segment in segments:
+                if (segment['physical_network'] == binding.host and
+                    segment['segmentation_id'] == seg):
+                    binding.segment = segment['id']
+
+            binding.vif_type = 'ovs'
+
             if not binding.segment:
                 LOG.warning(_("Device %(device)s requested by agent "
                               "%(agent_id)s on network %(network_id)s not "
@@ -139,7 +153,7 @@ class RpcCallbacks(dhcp_rpc_base.DhcpRpcCallbackMixin,
                      'admin_state_up': port.admin_state_up,
                      'network_type': segment[api.NETWORK_TYPE],
                      'segmentation_id': segment[api.SEGMENTATION_ID],
-                     'physical_network': segment[api.PHYSICAL_NETWORK]}
+                     'physical_network': 'physnet1'}
             LOG.debug(_("Returning: %s"), entry)
             return entry
 

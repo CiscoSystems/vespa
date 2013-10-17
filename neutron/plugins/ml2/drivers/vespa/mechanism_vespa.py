@@ -19,6 +19,7 @@ from oslo.config import cfg
 
 from neutron.openstack.common import log
 from neutron.plugins.ml2 import driver_api as api
+from neutron.plugins.ml2.drivers.vespa.type_vespa import VespaTypeDriver
 
 
 LOG = log.getLogger(__name__)
@@ -67,12 +68,28 @@ class IFCManager(object):
 
 class VespaMechanismDriver(api.MechanismDriver):
     def initialize(self):
+        self.type_driver = VespaTypeDriver()
         self.ifc_manager = IFCManager()
 
     def create_port_precommit(self, context):
         # Get tenant details from port context
-        tenant_id = port['tenant_id']
+        tenant_id = context.current['tenant_id']
         self.ifc_manager._is_tenant_created_on_ifc(tenant_id)
+
+        # Get network
+        network = context.network.current['id']
+
+        # Get host binding if any
+        host = context.current['binding:host_id']
+
+        # Get port mac
+        mac = context.current['mac_address']
+        
+        # Check if port is bound to a host
+        if host:
+            # Get or Reserve a segment for this network/host combo
+            seg = self.type_driver._check_and_allocate_segment_for_network(
+                    network, host)
 
     def create_port_postcommit(self, context):
         pass

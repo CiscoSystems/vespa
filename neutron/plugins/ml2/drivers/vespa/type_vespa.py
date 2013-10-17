@@ -18,11 +18,6 @@ import sys
 from oslo.config import cfg
 import sqlalchemy as sa
 
-from neutron.agent import securitygroups_rpc as sg_rpc
-from neutron.api.rpc.agentnotifiers import dhcp_rpc_agent_api
-from neutron.db import securitygroups_rpc_base as sg_db_rpc
-from neutron.openstack.common import rpc as c_rpc
-
 from neutron.common import constants as const
 from neutron.common import exceptions as exc
 from neutron.common import topics
@@ -32,8 +27,8 @@ from neutron.db import api as db_api
 from neutron.db import model_base
 from neutron.openstack.common import log
 from neutron.plugins.common import utils as plugin_utils
+from neutron.plugins.ml2 import db
 from neutron.plugins.ml2 import driver_api as api
-from neutron.plugins.ml2 import rpc
 from neutron.plugins.ml2.drivers.vespa import config as conf
 
 
@@ -73,9 +68,7 @@ class VespaAllocation(model_base.BASEV2):
                                                       ondelete="CASCADE"))
 
 
-class VespaTypeDriver(api.TypeDriver,
-                      sg_db_rpc.SecurityGroupServerRpcMixin,
-                      agentschedulers_db.DhcpAgentSchedulerDbMixin):
+class VespaTypeDriver(api.TypeDriver):
     """Manage state for VLAN networks with ML2."""
 
     def __init__(self):
@@ -87,7 +80,7 @@ class VespaTypeDriver(api.TypeDriver,
         return TYPE_VESPA
 
     def initialize(self):
-        self._setup_rpc()
+        #self._setup_rpc()
         conf.ML2MechVespaConfig()
         self._host_pools = conf.ML2MechVespaConfig.host_pools
         self._sync_pools()
@@ -161,7 +154,13 @@ class VespaTypeDriver(api.TypeDriver,
             else:
                 # Create a new segment for this network and pool
                 net = self.allocate_network_segment_per_pool(network_id,
-                                                             host_id)
+                                                             pool_id)
+                # Add a network segment in the DB
+                segment = {'network_id': network_id,
+                           'physical_network': host_id,
+                           'network_type': 'vlan',
+                           'segmentation_id': net.vlan_id}
+                db.add_network_segment(session, network_id, segment)
                 return net.vlan_id
 
         raise "Could not allocate segment for network"
@@ -188,6 +187,7 @@ class VespaTypeDriver(api.TypeDriver,
                                     vlan_id=allocated_segment,
                                     pool_id=pool_id)
             session.add(alloc)
+            session.flush()
             return alloc
         else:
             raise "No usable segment id found"
