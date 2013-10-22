@@ -98,7 +98,8 @@ class TypeManager(stevedore.named.NamedExtensionManager):
         raise exc.NoNetworkAvailable()
 
     def release_segment(self, session, segment):
-        network_type = segment.get(api.NETWORK_TYPE)
+        #network_type = segment.get(api.NETWORK_TYPE)
+        network_type = 'vespa'
         driver = self.drivers.get(network_type)
         driver.obj.release_segment(session, segment)
 

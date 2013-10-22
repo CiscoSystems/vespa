@@ -198,8 +198,8 @@ class VespaTypeDriver(api.TypeDriver):
         binding = session.query(VespaAllocation).\
             filter_by(pool_id=pool_id).\
             filter_by(network_id=network_id).first()
-
-        session.delete(alloc)
+        session.delete(binding)
+        session.flush()
 
     def get_network_segment_per_pool(self, network_id, pool_id):
         session = db_api.get_session()
@@ -210,11 +210,27 @@ class VespaTypeDriver(api.TypeDriver):
 
         return binding
 
+    def get_network_id_by_vlan_and_pool(self, vlan_id, pool_id):
+        session = db_api.get_session()
+        binding = session.query(VespaAllocation).\
+                  filter_by(pool_id=pool_id).\
+                  filter_by(vlan_id=vlan_id).first()
+
+        return binding.network_id
+
     def allocate_tenant_segment(self, session):
         pass
 
     def release_segment(self, session, segment):
-        pass
+        # Get host pool
+        host = segment['physical_network']
+        pool = self.get_host_pool(host)
+
+        seg_id = segment['segmentation_id']
+        # Get network id
+        network_id = self.get_network_id_by_vlan_and_pool(seg_id, pool.pool_id)
+        # Delete network pool allocation
+        self.delete_network_segment_per_pool(network_id, pool.pool_id)
 
     def validate_provider_segment(self, segment):
         pass
