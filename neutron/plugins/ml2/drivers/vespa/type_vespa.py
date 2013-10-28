@@ -30,6 +30,7 @@ from neutron.plugins.common import utils as plugin_utils
 from neutron.plugins.ml2 import db
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers.vespa import config as conf
+from neutron.plugins.ml2.drivers.vespa import ifc_client as ifc
 
 
 LOG = log.getLogger(__name__)
@@ -72,7 +73,13 @@ class VespaTypeDriver(api.TypeDriver):
     """Manage state for VLAN networks with ML2."""
 
     def __init__(self):
-        """TODO: Connect to the the IFC at init"""
+        # Connect to the the IFC
+        host = cfg.CONF.ml2_vespa.ifc_host
+        port = cfg.CONF.ml2_vespa.ifc_port
+        username = cfg.CONF.ml2_vespa.ifc_username
+        password = cfg.CONF.ml2_vespa.ifc_password
+        self.ifc = ifc.RestClient(host, port, username, password)
+
         self.usable_vlans = VLAN_MAX - VLAN_MIN
         self.pools = {}
 

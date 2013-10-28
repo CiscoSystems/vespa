@@ -17,10 +17,10 @@ from oslo.config import cfg
 
 
 vespa_opts = [
-    cfg.StrOpt('ifc_ip_address',
-               help=_("IP Address of the IFC controller")),
+    cfg.StrOpt('ifc_host',
+               help=_("Host name or IP Address of the IFC controller")),
     cfg.StrOpt('ifc_username',
-                help=_("Username for the IFC controller")),
+               help=_("Username for the IFC controller")),
     cfg.StrOpt('ifc_password',
                help=_("Password for the IFC controller")),
     cfg.StrOpt('ifc_port',
@@ -28,7 +28,8 @@ vespa_opts = [
 ]
 
 
-cfg.CONF.register_opts(vespa_opts, "vespa")
+cfg.CONF.register_opts(vespa_opts, "ml2_vespa")
+
 
 class ML2MechVespaConfig(object):
     """ML2 Mechanism Driver Vespa Configuration class."""
