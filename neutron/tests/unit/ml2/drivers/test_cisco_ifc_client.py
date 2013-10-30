@@ -1,17 +1,18 @@
-# Copyright (c) 2013 OpenStack Foundation.
+# Copyright (c) 2013 Cisco Systems
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
 #
-#    http://www.apache.org/licenses/LICENSE-2.0
+#      http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-# implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+# @author: Henry Gessau, Cisco Systems
 
 from neutron.common import log
 from neutron.plugins.ml2.drivers.vespa import ifc_client as ifc
@@ -108,3 +109,23 @@ class TestCiscoIfcClient(base.BaseTestCase):
                           TEST_TENANT, TEST_NETWORK)
         s.delete_tenant(TEST_TENANT)
         self.assertRaises(ValueError, s.get_tenant, TEST_TENANT)
+
+    def test_list_tenants(self):
+        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
+        tlist = s.list_tenants()
+        self.assertIsNotNone(tlist)
+
+    def test_list_networks(self):
+        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
+        nlist = s.list_networks()
+        self.assertIsNotNone(nlist)
+
+    def test_list_app_profiles(self):
+        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
+        aplist = s.list_app_profiles()
+        self.assertIsNotNone(aplist)
+
+    def test_list_epgs(self):
+        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
+        elist = s.list_epgs()
+        self.assertIsNotNone(elist)
