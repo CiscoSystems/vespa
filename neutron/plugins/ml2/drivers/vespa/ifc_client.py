@@ -18,6 +18,8 @@ import json
 import requests
 from webob import exc as wexc
 
+from neutron.plugins.ml2.drivers.cisco import exceptions as cexc
+
 
 def unicode2str(data):
     """
@@ -36,32 +38,39 @@ def unicode2str(data):
         return data
 
 
-TN_CLASS = 'fvTenant'
-BD_CLASS = 'fvBD'
-AP_CLASS = 'fvAp'
-EPG_CLASS = 'fvAEPg'
-SUBNET_CLASS = 'fvSubnet'
+IFC_TENANT = 'fvTenant'
+IFC_NETWORK = 'fvBD'
+IFC_AP = 'fvAp'
+IFC_EPG = 'fvAEPg'
+IFC_SUBNET = 'fvSubnet'
 
 
-def tn_dn(tenant_id):
-    return "uni/tn-%s" % tenant_id
+def requestdata(request_func):
+    """Decorator for REST requests.
 
-
-def bd_dn(tenant_id, network_id):
-    return "%s/BD-%s" % (tn_dn(tenant_id), network_id)
-
-
-def ap_dn(tenant_id, ap_id):
-    return "%s/ap-%s" % (tn_dn(tenant_id), ap_id)
-
-
-def epg_dn(tenant_id, ap_id, epg_id):
-    return "%s/epg-%s" % (ap_dn(tenant_id, ap_id), epg_id)
+    Before:
+        Verify there is an authenticated session (logged in to IFC)
+    After:
+        Verify we got a response and it is HTTP OK.
+        Extract the data from the response and return it.
+    """
+    def wrapper(self, *args, **kwargs):
+        if not self.username and self.authentication:
+            raise cexc.IfcSessionNotLoggedIn
+        response = request_func(*args, **kwargs)
+        if not response:
+            raise cexc.IfcHostNoResponse(url=args[0])
+        if response.status_code != wexc.HTTPOk.code:
+            raise cexc.IfcResponseNotOk(request=args[0],
+                                        status_code=response.status_code,
+                                        reason=response.reason)
+        return unicode2str(response.json()).get('imdata')
+    return wrapper
 
 
 class RestClient(object):
     """
-    docstring
+    IFC REST client class.
 
     Attributes:
         api_base        e.g. 'http://10.2.3.45:8000/api'
@@ -69,13 +78,23 @@ class RestClient(object):
         authentication  Login info. None if not logged in to controller.
     """
 
-    fmt = 'json'
-
-    admin_mo_names = {
-        TN_CLASS: ['admin', 'common', 'infra', 'mgmt'],
-        BD_CLASS: ['default', 'inb'],
-        AP_CLASS: ['default', 'access'],
-        EPG_CLASS: ['default'],
+    _mo_data = {
+        IFC_TENANT: {
+            'dn': "uni/tn-%s",
+            'admins': ['admin', 'common', 'infra', 'mgmt'],
+        },
+        IFC_NETWORK: {
+            'dn': "uni/tn-%s/BD-%s",
+            'admins': ['default', 'inb'],
+        },
+        IFC_AP: {
+            'dn': "uni/tn-%s/ap-%s",
+            'admins': ['default', 'access'],
+        },
+        IFC_EPG: {
+            'dn': "uni/tn-%s/ap-%s/epg-%s",
+            'admins': ['default'],
+        },
     }
 
     def __init__(self, host, port, usr=None, pwd=None, api='api', ssl=False):
@@ -83,32 +102,21 @@ class RestClient(object):
         protocol = ssl and 'https' or 'http'
         self.api_base = '%s://%s:%s/%s' % (protocol, host, port, api)
         self.session = requests.Session()
-        # TODO: check that session is OK
         self.authentication = None
         self.username = None
         if usr and pwd:
             self.login(usr, pwd)
-            # TODO: check for successful login
 
-    def _make_data(self, key, **attrs):
+    # Internal methods for data and URL manipulation
+
+    @staticmethod
+    def _make_data(key, **attrs):
         """Build the body for a msg out of a key and some attributes."""
-        if self.fmt == 'json':
-            return json.dumps({key: {'attributes': attrs}})
-        elif self.fmt == 'xml':
-            raise NotImplementedError
-        else:
-            raise NotImplementedError
+        return json.dumps({key: {'attributes': attrs}})
 
-    def _get_data(self, response):
-        """Extract and decode the data from the body of a response."""
-        if self.fmt == 'json':
-            data = unicode2str(response.json()).get('imdata')
-            # data = json.loads(response.content)
-            return data
-        elif self.fmt == 'xml':
-            raise NotImplementedError
-        else:
-            raise NotImplementedError
+    def _mo_dn(self, mo_class, *args):
+        """Return the distinguished name for a managed object class."""
+        return self._mo_data[mo_class]['dn'] % args
 
     def _mo_names(self, mo_list, mo_class, include_admin=False):
         """Extract a list of just the names of the managed objects.
@@ -117,72 +125,63 @@ class RestClient(object):
         mo_names = []
         for mo in mo_list:
             mo_name = mo[mo_class]['attributes']['name']
-            if include_admin or mo_name not in self.admin_mo_names[mo_class]:
+            if (include_admin or
+                    mo_name not in self._mo_data[mo_class]['admins']):
                 mo_names.append(mo_name)
         return mo_names
 
     def _api_url(self, api):
         """Create the URL for a simple API."""
-        return '%s/%s.%s' % (self.api_base, api, self.fmt)
+        return '%s/%s.json' % (self.api_base, api)
 
     def _mo_url(self, dn):
         """Create a URL for a MO lookup by DN."""
-        return '%s/mo/%s.%s' % (self.api_base, dn, self.fmt)
+        return '%s/mo/%s.json' % (self.api_base, dn)
 
-    def _qry_url(self, cls):
-        """Create a URL for a query lookup by class."""
-        return '%s/class/%s.%s' % (self.api_base, cls, self.fmt)
+    def _qry_url(self, mo_class):
+        """Create a URL for a query lookup by MO class."""
+        return '%s/class/%s.json' % (self.api_base, mo_class)
 
-    # TODO: get() and post() require valid session and login
+    # REST requests
 
+    @requestdata
     def get(self, request):
         """Retrieve data from the server."""
-        response = self.session.get(self._api_url(request))
-        data = self._get_data(response)
-        return response, data
+        return self.session.get(self._api_url(request))
 
-    def _get_mo(self, dn):
+    @requestdata
+    def _get_mo(self, mo_class, *args):
         """Retrieve a MO by DN."""
-        response = self.session.get(self._mo_url(dn) + '?query-target=self')
-        imdata = self._get_data(response)
-        return response, imdata
+        dn = self._mo_dn(mo_class, *args)
+        return self.session.get(self._mo_url(dn) + '?query-target=self')
 
-    def _list_mo(self, cls):
-        """Retrieve a filtered list of MOs for a class."""
-        response = self.session.get(self._qry_url(cls))
-        data = self._get_data(response)
-        return response, data
+    @requestdata
+    def _list_mo(self, mo_class):
+        """Retrieve the list of MOs for a class."""
+        return self.session.get(self._qry_url(mo_class))
 
+    @requestdata
     def post(self, request, data):
         """Post generic data to the server."""
-        reponse = self.session.post(self._api_url(request), data=data)
-        imdata = self._get_data(reponse)
-        return reponse, imdata
+        return self.session.post(self._api_url(request), data=data)
 
-    def _post_mo(self, request, data):
+    # Login and Logout
+
+    @requestdata
+    def _post_mo(self, mo_class, *args, **data):
         """Post data for MO to the server."""
-        reponse = self.session.post(self._mo_url(request), data=data)
-        imdata = self._get_data(reponse)
-        return reponse, imdata
+        url = self._mo_url(self._mo_dn(mo_class, *args))
+        data = self._make_data(mo_class, **data)
+        return self.session.post(url, data=data)
 
     def login(self, usr, pwd):
         """Log in to server. Save user name and authentication."""
         name_pwd = self._make_data('aaaUser', name=usr, pwd=pwd)
-        rsp, self.authentication = self.post('aaaLogin', data=name_pwd)
-        if not rsp:
-            print "ERROR: NO RESPONSE FROM SERVER"
-            self.authentication = None
-            return
-        if rsp.status_code != wexc.HTTPOk.code:
-            print "ERROR: SERVER RESPONSE CODE", rsp.status_code
-            self.authentication = None
-            return
+        self.authentication = self.post('aaaLogin', data=name_pwd)
         login_data = self.authentication[0]
-        if login_data:
-            if 'error' in login_data:
-                print 'ERROR: FAILED TO LOG IN'
-                self.authentication = None
-                return
+        if login_data and 'error' in login_data:
+            self.authentication = None
+            raise cexc.IfcLoginFailed(user=usr)
         self.username = usr
         return self.authentication
 
@@ -190,27 +189,13 @@ class RestClient(object):
         """End session with server."""
         if self.authentication and self.username:
             data = self._make_data('aaaUser', name=self.username)
-            rsp, bye = self.post('aaaLogout', data=data)
-            if rsp and rsp.status_code == wexc.HTTPOk.code and rsp.ok:
-                self.authentication = None
-                self.username = None
-                return True
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Useful for 'with RestClient() as:' contexts."""
-        self.logout()
+            bye = self.post('aaaLogout', data=data)
+            self.authentication = None
+            self.username = None
+            return bye
 
     # ------- CRUDs --------
-
-    # TODO: decorate CRUDs with authentication verifier
-    @staticmethod
-    def _verify_response(response, operation):
-        # TODO: this should raise RestServerErrors
-        if not response:
-            raise ValueError("%s: No response from server" % operation)
-        if response.status_code != wexc.HTTPOk.code:
-            raise ValueError("%s: Server returned status code %d" %
-                             (operation, response.status_code))
+    # Create, Get, List, Update, Delete
 
     # Tenants
 
@@ -219,40 +204,29 @@ class RestClient(object):
             # Use existing tenant if it's already created
             tenant = self.get_tenant(tenant_id)
         except ValueError:
-            data = self._make_data(TN_CLASS)
-            rsp, tenant = self._post_mo(tn_dn(tenant_id), data=data)
-            self._verify_response(rsp, 'create_tenant(%s)' % tenant_id)
+            tenant = self._post_mo(IFC_TENANT, tenant_id)
         return tenant
 
     def get_tenant(self, tenant_id):
-        rsp, tenant = self._get_mo(tn_dn(tenant_id))
-        self._verify_response(rsp, 'get_tenant(%s)' % tenant_id)
+        tenant = self._get_mo(self._mo_dn(IFC_TENANT, tenant_id))
         if not tenant:
             raise ValueError("Tenant '%s' not found" % tenant_id)
         return tenant
 
     def list_tenants(self):
-        rsp, ifc_tenants = self._list_mo(TN_CLASS)
-        self._verify_response(rsp, 'list_tenants()')
-        tenant_names = self._mo_names(ifc_tenants, TN_CLASS)
-        return tenant_names
+        ifc_tenants = self._list_mo(IFC_TENANT)
+        return self._mo_names(ifc_tenants, IFC_TENANT)
 
     def update_tenant(self, tenant_id, **attrs):
         self.get_tenant(tenant_id)  # raises if tenant not found
-        data = self._make_data(TN_CLASS, attrs)
-        rsp, tenant = self._post_mo(tn_dn(tenant_id), data=data)
-        self._verify_response(rsp, 'update_tenant(%s)' % tenant_id)
-        return tenant
+        return self._post_mo(IFC_TENANT, tenant_id, **attrs)
 
     def delete_tenant(self, tenant_id):
         try:
             self.get_tenant(tenant_id)
         except ValueError:
             return True
-        data = self._make_data(TN_CLASS, status='deleted')
-        rsp, tenant = self._post_mo(tn_dn(tenant_id), data=data)
-        self._verify_response(rsp, 'delete_tenant(%s)' % tenant_id)
-        return tenant
+        return self._post_mo(IFC_TENANT, tenant_id, status='deleted')
 
     # Networks
 
@@ -263,43 +237,31 @@ class RestClient(object):
             # Use existing network if it's already created
             network = self.get_network(network_id, tenant_id)
         except ValueError:
-            data = self._make_data(BD_CLASS)
-            rsp, network = self._post_mo(bd_dn(tenant_id, network_id),
-                                        data=data)
-            self._verify_response(rsp, 'create_network(%s)' % network_id)
+            network = self._post_mo(IFC_NETWORK, tenant_id, network_id)
         return network
 
     def get_network(self, tenant_id, network_id):
         self.get_tenant(tenant_id)  # raises if tenant not found
-        rsp, network = self._get_mo(bd_dn(tenant_id, network_id))
-        self._verify_response(rsp, 'get_network(%s)' % network_id)
+        network = self._get_mo(IFC_NETWORK, tenant_id, network_id)
         if not network:
             raise ValueError("Network '%s' not found" % network_id)
         return network
 
     def list_networks(self):
-        rsp, ifc_networks = self._list_mo(BD_CLASS)
-        self._verify_response(rsp, 'list_networks()')
-        net_names = self._mo_names(ifc_networks, BD_CLASS)
-        return net_names
+        ifc_networks = self._list_mo(IFC_NETWORK)
+        return self._mo_names(ifc_networks, IFC_NETWORK)
 
     def update_network(self, tenant_id, network_id, **attrs):
         self.get_network(tenant_id, network_id)  # Raises if not found
-        data = self._make_data(BD_CLASS, attrs)
-        rsp, network = self._post_mo(bd_dn(tenant_id, network_id),
-                                    data=data)
-        self._verify_response(rsp, 'update_network(%s)' % network_id)
-        return network
+        return self._post_mo(IFC_NETWORK, tenant_id, network_id, **attrs)
 
     def delete_network(self, tenant_id, network_id):
         try:
             self.get_network(tenant_id, network_id)
         except ValueError:
             return True
-        data = self._make_data(BD_CLASS, status='deleted')
-        rsp, network = self._post_mo(bd_dn(tenant_id, network_id), data=data)
-        self._verify_response(rsp, 'delete_network(%s)' % network_id)
-        return network
+        return self._post_mo(IFC_NETWORK, tenant_id, network_id,
+                             status='deleted')
 
     # Application Profiles
 
@@ -310,41 +272,30 @@ class RestClient(object):
             # Use existing profile if it's already created
             profile = self.get_app_profile(tenant_id, ap_id)
         except ValueError:
-            data = self._make_data(AP_CLASS)
-            rsp, profile = self._post_mo(ap_dn(tenant_id, ap_id), data=data)
-            self._verify_response(rsp, 'create_ap(%s)' % ap_id)
+            profile = self._post_mo(IFC_AP, tenant_id, ap_id)
         return profile
 
     def get_app_profile(self, tenant_id, ap_id):
         self.get_tenant(tenant_id)  # raises if tenant not found
-        rsp, profile = self._get_mo(ap_dn(tenant_id, ap_id))
-        self._verify_response(rsp, 'get_ap(%s)' % ap_id)
+        profile = self._get_mo(IFC_AP, tenant_id, ap_id)
         if not profile:
             raise ValueError("App profile '%s' not found" % ap_id)
         return profile
 
     def list_app_profiles(self):
-        rsp, ifc_app_profiles = self._list_mo(AP_CLASS)
-        self._verify_response(rsp, 'list_app_profiles()')
-        ap_names = self._mo_names(ifc_app_profiles, AP_CLASS)
-        return ap_names
+        ifc_app_profiles = self._list_mo(IFC_AP)
+        return self._mo_names(ifc_app_profiles, IFC_AP)
 
     def update_app_profile(self, tenant_id, ap_id, **attrs):
         self.get_app_profile(tenant_id, ap_id)  # Raises if not found
-        data = self._make_data(AP_CLASS, attrs)
-        rsp, profile = self._post_mo(ap_dn(tenant_id, ap_id), data=data)
-        self._verify_response(rsp, 'update_ap(%s)' % ap_id)
-        return profile
+        return self._post_mo(IFC_AP, tenant_id, ap_id, **attrs)
 
     def delete_app_profile(self, tenant_id, ap_id):
         try:
             self.get_app_profile(tenant_id, ap_id)
         except ValueError:
             return True
-        data = self._make_data(AP_CLASS, status='deleted')
-        rsp, profile = self._post_mo(ap_dn(tenant_id, ap_id), data=data)
-        self._verify_response(rsp, 'delete_ap(%s)' % ap_id)
-        return profile
+        return self._post_mo(IFC_AP, tenant_id, ap_id, status='deleted')
 
     # End-Point Groups
 
@@ -355,40 +306,29 @@ class RestClient(object):
             # Use existing EPG if it's already created
             epg = self.get_epg(tenant_id, ap_id, epg_id)
         except ValueError:
-            data = self._make_data(EPG_CLASS)
-            rsp, epg = self._post_mo(epg_dn(tenant_id, ap_id, epg_id),
-                                    data=data)
-            self._verify_response(rsp, 'create_epg(%s)' % epg_id)
+            epg = self._post_mo(IFC_EPG, tenant_id, ap_id, epg_id)
         return epg
 
     def get_epg(self, tenant_id, ap_id, epg_id):
         self.get_tenant(tenant_id)  # raises if tenant not found
         self.get_app_profile(tenant_id, ap_id)  # raises if ap_id not found
-        rsp, epg = self._get_mo(epg_dn(tenant_id, ap_id, epg_id))
-        self._verify_response(rsp, 'get_epg(%s)' % epg_id)
+        epg = self._get_mo(IFC_EPG, tenant_id, ap_id, epg_id)
         if not epg:
             raise ValueError("EPG '%s' not found" % epg_id)
         return epg
 
     def list_epgs(self):
-        rsp, ifc_epgs = self._list_mo(EPG_CLASS)
-        self._verify_response(rsp, 'list_epgs()')
-        epg_names = self._mo_names(ifc_epgs, EPG_CLASS)
-        return epg_names
+        ifc_epgs = self._list_mo(IFC_EPG)
+        return self._mo_names(ifc_epgs, IFC_EPG)
 
     def update_epg(self, tenant_id, ap_id, epg_id, **attrs):
         self.get_epg(tenant_id, ap_id, epg_id)  # Raises if not found
-        data = self._make_data(EPG_CLASS, attrs)
-        rsp, epg = self._post_mo(epg_dn(tenant_id, ap_id, epg_id), data=data)
-        self._verify_response(rsp, 'update_epg(%s)' % epg_id)
-        return epg
+        return self._post_mo(IFC_EPG, tenant_id, ap_id, epg_id, **attrs)
 
     def delete_epg(self, tenant_id, ap_id, epg_id):
         try:
             self.get_epg(tenant_id, ap_id, epg_id)
         except ValueError:
             return True
-        data = self._make_data(EPG_CLASS, status='deleted')
-        rsp, epg = self._post_mo(epg_dn(tenant_id, ap_id, epg_id), data=data)
-        self._verify_response(rsp, 'delete_epg(%s)' % epg_id)
-        return epg
+        return self._post_mo(IFC_EPG, tenant_id, ap_id, epg_id,
+                             status='deleted')
