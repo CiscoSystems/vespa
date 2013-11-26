@@ -64,8 +64,9 @@ class VespaAllocation(model_base.BASEV2):
                            primary_key=True)
     vlan_id = sa.Column(sa.Integer, nullable=False, primary_key=True,
                         autoincrement=False)
-    pool_id = sa.Column(sa.String(255), sa.ForeignKey('ml2_vespa_hostpools.pool_id',
-                                                      ondelete="CASCADE"))
+    pool_id = sa.Column(sa.String(255))
+    #pool_id = sa.Column(sa.String(255), sa.ForeignKey('ml2_vespa_hostpools.pool_id',
+    #                                                  ondelete="CASCADE"))
 
 
 class VespaTypeDriver(api.TypeDriver):
