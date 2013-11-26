@@ -57,7 +57,7 @@ def requestdata(request_func):
     def wrapper(self, *args, **kwargs):
         if not self.username and self.authentication:
             raise cexc.IfcSessionNotLoggedIn
-        response = request_func(*args, **kwargs)
+        response = request_func(self, *args, **kwargs)
         if not response:
             raise cexc.IfcHostNoResponse(url=args[0])
         if response.status_code != wexc.HTTPOk.code:
@@ -143,7 +143,6 @@ class RestClient(object):
         return '%s/class/%s.json' % (self.api_base, mo_class)
 
     # REST requests
-
     @requestdata
     def get(self, request):
         """Retrieve data from the server."""

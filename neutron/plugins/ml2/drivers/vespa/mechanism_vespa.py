@@ -70,9 +70,21 @@ class IFCManager(object):
         self.ifc.create_tenant(tenant_id)
 
     def get_epg_list_from_ifc(self):
-        """Get a list of all EPG's from the IFC"""
+        """Get a list of all EPG's from the IFC."""
         self.ifc_epgs = self.ifc.list_epgs()
 
+    def search_for_epg_with_net_and_secgroups(self, network_id,
+                                              security_groups):
+        """Search the list of cached EPGs for a match."""
+        for epg in self.ifc_epgs:
+            # Compare network
+            for security_group in security_groups:
+                # Compare security groups
+                pass
+
+    def create_epg_with_net_and_secgroups(self, network_id,
+                                          security_groups):
+        pass
 
 class VespaMechanismDriver(api.MechanismDriver):
     def initialize(self):
@@ -82,7 +94,7 @@ class VespaMechanismDriver(api.MechanismDriver):
     def create_port_precommit(self, context):
         # Get tenant details from port context
         tenant_id = context.current['tenant_id']
-        self.ifc_manager.ensure_tenant_created_on_ifc(tenant_id)
+        #self.ifc_manager.ensure_tenant_created_on_ifc(tenant_id)
 
         # Get network
         network = context.network.current['id']
@@ -98,7 +110,21 @@ class VespaMechanismDriver(api.MechanismDriver):
             # Get or Reserve a segment for this network/host combo
             seg = self.type_driver._check_and_allocate_segment_for_network(
                     network, host)
+        else:
+            # Not a VM port, return for now
+            return
 
+        # Get security groups for the port
+        secgrps = context.current['security_groups']
+
+        # Check if the combination of security group + network exists
+        # already  as an EPG
+        epg = self.ifc_manager.search_for_epg_with_net_and_secgroups(network,
+                                                                     secgrps)                                                    
+        if not epg:
+            # Create a new EPG with this network and security group
+            epg = self.ifc_manager.create_epg_with_net_and_secgroups(network,
+                                                                     secgrps)
     def create_port_postcommit(self, context):
         pass
 
