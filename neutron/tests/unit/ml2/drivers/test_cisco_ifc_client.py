@@ -30,8 +30,7 @@ TEST_PWD = 'ins3965!'
 
 TEST_TENANT = 'citizen14'
 TEST_NETWORK = 'network99'
-TEST_SUBNET = '10.3.2.1'
-#TEST_SUBNET = 'sub10321'
+TEST_SUBNET = '10.3.2.1/24'
 TEST_AP = 'appProfile001'
 TEST_EPG = 'endPointGroup001'
 

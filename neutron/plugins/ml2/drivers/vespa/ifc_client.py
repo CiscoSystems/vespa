@@ -96,7 +96,7 @@ class RestClient(object):
             'admins': ['default', 'inb'],
         },
         IFC_SUBNET: {
-            'dn': "uni/tn-%s/BD-%s/subnet-%s",
+            'dn': "uni/tn-%s/BD-%s/subnet-[%s]",
             'admins': [],
         },
         IFC_AP: {
@@ -280,7 +280,7 @@ class RestClient(object):
         ensure_status(bridge_domain, IFC_BD, 'deleted')
         return bridge_domain
 
-    # Subnets
+    # Subnets (gw_ip is a string: 'ip_address/mask')
 
     def create_subnet(self, tenant_id, bd_id, gw_ip):
         # Ensure tenant and BD exist (create them if needed)
