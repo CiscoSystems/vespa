@@ -23,13 +23,15 @@ LOG = log.logging.getLogger(__name__)
 ML2_PLUGIN = 'neutron.plugins.ml2.plugin.Ml2Plugin'
 PHYS_NET = 'physnet1'
 
-TEST_HOST = '172.21.32.120'  # was 116
+TEST_HOST = '172.21.32.71'   # was .116, .120, .71
 TEST_PORT = '7580'           # was 8000
 TEST_USR = 'admin'
 TEST_PWD = 'ins3965!'
 
 TEST_TENANT = 'citizen14'
 TEST_NETWORK = 'network99'
+TEST_SUBNET = '10.3.2.1'
+#TEST_SUBNET = 'sub10321'
 TEST_AP = 'appProfile001'
 TEST_EPG = 'endPointGroup001'
 
@@ -85,14 +87,14 @@ class TestCiscoIfcClient(base.BaseTestCase):
 
     def test_lookup_nonexistant_network(self):
         s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-        self.assertRaises(ValueError, s.get_network,
+        self.assertRaises(ValueError, s.get_bridge_domain,
                           'LarryKing', 'CableNews')
 
     def test_create_and_lookup_network(self):
         s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
         try:
-            s.get_network(TEST_TENANT, TEST_NETWORK)
-            s.delete_network(TEST_TENANT, TEST_NETWORK)
+            s.get_bridge_domain(TEST_TENANT, TEST_NETWORK)
+            s.delete_bridge_domain(TEST_TENANT, TEST_NETWORK)
         except ValueError:
             pass
         try:
@@ -100,13 +102,35 @@ class TestCiscoIfcClient(base.BaseTestCase):
             s.delete_tenant(TEST_TENANT)
         except ValueError:
             pass
-        new_network = s.create_network(TEST_TENANT, TEST_NETWORK)
+        new_network = s.create_bridge_domain(TEST_TENANT, TEST_NETWORK)
         self.assertIsNotNone(new_network)
         tenant = s.get_tenant(TEST_TENANT)
         self.assertIsNotNone(tenant)
-        s.delete_network(TEST_TENANT, TEST_NETWORK)
-        self.assertRaises(ValueError, s.get_network,
+        s.delete_bridge_domain(TEST_TENANT, TEST_NETWORK)
+        self.assertRaises(ValueError, s.get_bridge_domain,
                           TEST_TENANT, TEST_NETWORK)
+        s.delete_tenant(TEST_TENANT)
+        self.assertRaises(ValueError, s.get_tenant, TEST_TENANT)
+
+    def test_create_and_lookup_subnet(self):
+        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
+        try:
+            s.get_subnet(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
+            s.delete_subnet(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
+        except ValueError:
+            pass
+        try:
+            s.get_tenant(TEST_TENANT)
+            s.delete_tenant(TEST_TENANT)
+        except ValueError:
+            pass
+        new_sn = s.create_subnet(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
+        self.assertIsNotNone(new_sn)
+        tenant = s.get_tenant(TEST_TENANT)
+        self.assertIsNotNone(tenant)
+        s.delete_subnet(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
+        self.assertRaises(ValueError, s.get_subnet,
+                          TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
         s.delete_tenant(TEST_TENANT)
         self.assertRaises(ValueError, s.get_tenant, TEST_TENANT)
 
@@ -117,8 +141,13 @@ class TestCiscoIfcClient(base.BaseTestCase):
 
     def test_list_networks(self):
         s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-        nlist = s.list_networks()
+        nlist = s.list_bridge_domains()
         self.assertIsNotNone(nlist)
+
+    def test_list_subnets(self):
+        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
+        snlist = s.list_subnets()
+        self.assertIsNotNone(snlist)
 
     def test_list_app_profiles(self):
         s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)

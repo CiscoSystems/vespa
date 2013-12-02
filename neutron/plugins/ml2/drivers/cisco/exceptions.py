@@ -93,4 +93,8 @@ class IfcLoginFailed(exceptions.NotAuthorized):
 
 
 class IfcSessionNotLoggedIn(exceptions.NotAuthorized):
-    message = _('Authorized IFC session not established')
+    message = _("Authorized IFC session not established")
+
+
+class IfcMoStatusChangeFailed(exceptions.StateInvalid):
+    message = _("Managed Object %(mo_class)s '%(name)s' not %(status)")

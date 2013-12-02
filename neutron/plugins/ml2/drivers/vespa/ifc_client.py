@@ -38,8 +38,16 @@ def unicode2str(data):
         return data
 
 
+def ensure_status(mo, mo_class, status):
+    """Ensure that the status of a Managed Object is as expected."""
+    if mo[0][mo_class]['attributes']['status'] != status:
+        name = mo[0][mo_class]['attributes']['name']
+        raise cexc.IfcMoStatusChangeFailed(
+            mo_class=mo_class, name=name, status=status)
+
+
 IFC_TENANT = 'fvTenant'
-IFC_NETWORK = 'fvBD'
+IFC_BD = 'fvBD'
 IFC_AP = 'fvAp'
 IFC_EPG = 'fvAEPg'
 IFC_SUBNET = 'fvSubnet'
@@ -83,9 +91,13 @@ class RestClient(object):
             'dn': "uni/tn-%s",
             'admins': ['admin', 'common', 'infra', 'mgmt'],
         },
-        IFC_NETWORK: {
+        IFC_BD: {
             'dn': "uni/tn-%s/BD-%s",
             'admins': ['default', 'inb'],
+        },
+        IFC_SUBNET: {
+            'dn': "uni/tn-%s/BD-%s/subnet-%s",
+            'admins': [],
         },
         IFC_AP: {
             'dn': "uni/tn-%s/ap-%s",
@@ -204,10 +216,11 @@ class RestClient(object):
             tenant = self.get_tenant(tenant_id)
         except ValueError:
             tenant = self._post_mo(IFC_TENANT, tenant_id)
+        ensure_status(tenant, IFC_TENANT, 'created')
         return tenant
 
     def get_tenant(self, tenant_id):
-        tenant = self._get_mo(self._mo_dn(IFC_TENANT, tenant_id))
+        tenant = self._get_mo(IFC_TENANT, tenant_id)
         if not tenant:
             raise ValueError("Tenant '%s' not found" % tenant_id)
         return tenant
@@ -225,42 +238,85 @@ class RestClient(object):
             self.get_tenant(tenant_id)
         except ValueError:
             return True
-        return self._post_mo(IFC_TENANT, tenant_id, status='deleted')
+        tenant = self._post_mo(IFC_TENANT, tenant_id, status='deleted')
+        ensure_status(tenant, IFC_TENANT, 'deleted')
+        return tenant
 
-    # Networks
+    # Bridge Domains (networks in openstack)
 
-    def create_network(self, tenant_id, network_id):
+    def create_bridge_domain(self, tenant_id, bd_id):
         # First ensure the tenant exists (create it if it doesn't)
         self.create_tenant(tenant_id)
         try:
-            # Use existing network if it's already created
-            network = self.get_network(network_id, tenant_id)
+            # Use existing BD if it's already created
+            bridge_domain = self.get_bridge_domain(bd_id, tenant_id)
         except ValueError:
-            network = self._post_mo(IFC_NETWORK, tenant_id, network_id)
-        return network
+            bridge_domain = self._post_mo(IFC_BD, tenant_id, bd_id)
+            ensure_status(bridge_domain, IFC_BD, 'created')
+        return bridge_domain
 
-    def get_network(self, tenant_id, network_id):
+    def get_bridge_domain(self, tenant_id, bd_id):
         self.get_tenant(tenant_id)  # raises if tenant not found
-        network = self._get_mo(IFC_NETWORK, tenant_id, network_id)
-        if not network:
-            raise ValueError("Network '%s' not found" % network_id)
-        return network
+        bridge_domain = self._get_mo(IFC_BD, tenant_id, bd_id)
+        if not bridge_domain:
+            raise ValueError("Bridge Domain '%s' not found" % bd_id)
+        return bridge_domain
 
-    def list_networks(self):
-        ifc_networks = self._list_mo(IFC_NETWORK)
-        return self._mo_names(ifc_networks, IFC_NETWORK)
+    def list_bridge_domains(self):
+        bridge_domains = self._list_mo(IFC_BD)
+        return self._mo_names(bridge_domains, IFC_BD)
 
-    def update_network(self, tenant_id, network_id, **attrs):
-        self.get_network(tenant_id, network_id)  # Raises if not found
-        return self._post_mo(IFC_NETWORK, tenant_id, network_id, **attrs)
+    def update_bridge_domain(self, tenant_id, bd_id, **attrs):
+        self.get_bridge_domain(tenant_id, bd_id)  # Raises if not found
+        return self._post_mo(IFC_BD, tenant_id, bd_id, **attrs)
 
-    def delete_network(self, tenant_id, network_id):
+    def delete_bridge_domain(self, tenant_id, bd_id):
         try:
-            self.get_network(tenant_id, network_id)
+            self.get_bridge_domain(tenant_id, bd_id)
         except ValueError:
             return True
-        return self._post_mo(IFC_NETWORK, tenant_id, network_id,
-                             status='deleted')
+        bridge_domain = self._post_mo(IFC_BD, tenant_id, bd_id,
+                                      status='deleted')
+        ensure_status(bridge_domain, IFC_BD, 'deleted')
+        return bridge_domain
+
+    # Subnets
+
+    def create_subnet(self, tenant_id, bd_id, gw_ip):
+        # Ensure tenant and BD exist (create them if needed)
+        self.create_bridge_domain(tenant_id, bd_id)
+        try:
+            # Use existing subnet if it's already created
+            subnet = self.get_subnet(tenant_id, bd_id, gw_ip)
+        except ValueError:
+            subnet = self._post_mo(IFC_SUBNET, tenant_id, bd_id, gw_ip)
+            ensure_status(subnet, IFC_SUBNET, 'created')
+        return subnet
+
+    def get_subnet(self, tenant_id, bd_id, gw_ip):
+        self.get_tenant(tenant_id)  # raises if tenant not found
+        subnet = self._get_mo(IFC_SUBNET, tenant_id, bd_id, gw_ip)
+        if not subnet:
+            raise ValueError("Subnet with gateway %s not found" % gw_ip)
+        return subnet
+
+    def list_subnets(self):
+        subnets = self._list_mo(IFC_SUBNET)
+        return self._mo_names(subnets, IFC_SUBNET)
+
+    def update_subnet(self, tenant_id, bd_id, gw_ip, **attrs):
+        self.get_subnet(tenant_id, bd_id, gw_ip)  # Raises if not found
+        return self._post_mo(IFC_SUBNET, tenant_id, bd_id, gw_ip, **attrs)
+
+    def delete_subnet(self, tenant_id, bd_id, gw_ip):
+        try:
+            self.get_subnet(tenant_id, bd_id, gw_ip)
+        except ValueError:
+            return True
+        subnet = self._post_mo(IFC_SUBNET, tenant_id, bd_id, gw_ip,
+                               status='deleted')
+        ensure_status(subnet, IFC_SUBNET, 'deleted')
+        return subnet
 
     # Application Profiles
 
@@ -272,6 +328,7 @@ class RestClient(object):
             profile = self.get_app_profile(tenant_id, ap_id)
         except ValueError:
             profile = self._post_mo(IFC_AP, tenant_id, ap_id)
+            ensure_status(profile, IFC_AP, 'created')
         return profile
 
     def get_app_profile(self, tenant_id, ap_id):
@@ -294,7 +351,9 @@ class RestClient(object):
             self.get_app_profile(tenant_id, ap_id)
         except ValueError:
             return True
-        return self._post_mo(IFC_AP, tenant_id, ap_id, status='deleted')
+        profile = self._post_mo(IFC_AP, tenant_id, ap_id, status='deleted')
+        ensure_status(profile, IFC_AP, 'deleted')
+        return profile
 
     # End-Point Groups
 
@@ -306,6 +365,7 @@ class RestClient(object):
             epg = self.get_epg(tenant_id, ap_id, epg_id)
         except ValueError:
             epg = self._post_mo(IFC_EPG, tenant_id, ap_id, epg_id)
+            ensure_status(epg, IFC_EPG, 'created')
         return epg
 
     def get_epg(self, tenant_id, ap_id, epg_id):
@@ -329,5 +389,7 @@ class RestClient(object):
             self.get_epg(tenant_id, ap_id, epg_id)
         except ValueError:
             return True
-        return self._post_mo(IFC_EPG, tenant_id, ap_id, epg_id,
-                             status='deleted')
+        epg = self._post_mo(IFC_EPG, tenant_id, ap_id, epg_id,
+                            status='deleted')
+        ensure_status(epg, IFC_EPG, 'deleted')
+        return epg

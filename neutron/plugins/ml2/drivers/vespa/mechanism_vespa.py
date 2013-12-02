@@ -52,7 +52,8 @@ class IFCManager(object):
 
         # Update lists of managed objects from the IFC
         self.ifc_tenants = self.ifc.list_tenants()
-        self.ifc_networks = self.ifc.list_networks()
+        self.ifc_bridge_domains = self.ifc.list_bridge_domains()
+        self.ifc_subnets = self.ifc.list_subnets()
         self.ifc_app_profiles = self.ifc.list_app_profiles()
         self.ifc_epgs = self.ifc.list_epgs()
 
