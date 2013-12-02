@@ -64,11 +64,14 @@ class IFCManager(object):
         if not found
         """
         if not tenant_id in self.ifc_tenants:
-            self.create_tenant_on_ifc(tenant_id)
+            self.ifc.create_tenant(tenant_id)
 
-    def create_tenant_on_ifc(self, tenant_id):
-        """Create an Openstack tenant on the IFC."""
-        self.ifc.create_tenant(tenant_id)
+    def ensure_bd_created_on_ifc(self, tenant_id, bd_id):
+        if not bd_id in self.ifc_bridge_domains:
+            self.ifc.create_bridge_domain(tenant_id, bd_id)
+
+    def delete_bd_on_ifc(self, tenant_id, bd_id):
+        self.ifc.delete_bridge_domain(tenant_id, bd_id)
 
     def get_epg_list_from_ifc(self):
         """Get a list of all EPG's from the IFC."""
@@ -95,7 +98,7 @@ class VespaMechanismDriver(api.MechanismDriver):
     def create_port_precommit(self, context):
         # Get tenant details from port context
         tenant_id = context.current['tenant_id']
-        #self.ifc_manager.ensure_tenant_created_on_ifc(tenant_id)
+        self.ifc_manager.ensure_tenant_created_on_ifc(tenant_id)
 
         # Get network
         network = context.network.current['id']
@@ -130,10 +133,19 @@ class VespaMechanismDriver(api.MechanismDriver):
         pass
 
     def create_network_precommit(self, context):
-        pass
+        net_id = context.current['id']
+        tenant_id = context.current['tenant_id']
+        
+        self.ifc_manager.ensure_bd_created_on_ifc(tenant_id, net_id)
 
     def create_network_postcommit(self, context):
         pass
+
+    def delete_network_precommit(self, context):
+        net_id = context.current['id']
+        tenant_id = context.current['tenant_id']
+
+        self.ifc_manager.delete_bd_on_ifc(tenant_id, net_id)
 
     def create_subnet_precommit(self, context):
         pass

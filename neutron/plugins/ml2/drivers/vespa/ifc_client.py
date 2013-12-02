@@ -216,7 +216,7 @@ class RestClient(object):
             tenant = self.get_tenant(tenant_id)
         except ValueError:
             tenant = self._post_mo(IFC_TENANT, tenant_id)
-        ensure_status(tenant, IFC_TENANT, 'created')
+            ensure_status(tenant, IFC_TENANT, 'created')
         return tenant
 
     def get_tenant(self, tenant_id):
