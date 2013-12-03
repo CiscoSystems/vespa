@@ -14,6 +14,7 @@
 #    under the License.
 #
 # @author: Arvind Somya (asomya@cisco.com), Cisco Systems Inc.
+import re
 
 from oslo.config import cfg
 
@@ -65,13 +66,20 @@ class IFCManager(object):
         """
         if not tenant_id in self.ifc_tenants:
             self.ifc.create_tenant(tenant_id)
+            self.ifc_tenants.append(tenant_id)
 
     def ensure_bd_created_on_ifc(self, tenant_id, bd_id):
         if not bd_id in self.ifc_bridge_domains:
             self.ifc.create_bridge_domain(tenant_id, bd_id)
+            self.ifc_bridge_domains.append(bd_id)
 
     def delete_bd_on_ifc(self, tenant_id, bd_id):
         self.ifc.delete_bridge_domain(tenant_id, bd_id)
+
+    def ensure_subnet_created_on_ifc(self, tenant_id, bd_id, subnet_id, gw_ip):
+        if not subnet_id in self.ifc_subnets:
+            self.ifc.create_subnet(tenant_id, bd_id, gw_ip)
+            self.ifc_subnets.append(subnet_id)
 
     def get_epg_list_from_ifc(self):
         """Get a list of all EPG's from the IFC."""
@@ -148,7 +156,16 @@ class VespaMechanismDriver(api.MechanismDriver):
         self.ifc_manager.delete_bd_on_ifc(tenant_id, net_id)
 
     def create_subnet_precommit(self, context):
-        pass
+        tenant_id = context.current['tenant_id']
+        network_id = context.current['network_id']
+        subnet_id = context.current['id']
+        gateway_ip = context.current['gateway_ip']
+        cidr = context.current['cidr']
+        netmask = re.sub(r"^.+\/",'', cidr)
+        gateway_ip = gateway_ip + '/' + netmask
+
+        self.ifc_manager.ensure_subnet_created_on_ifc(tenant_id, network_id,
+                                                      subnet_id, gateway_ip)
 
     def create_subnet_postcommit(self, context):
         pass

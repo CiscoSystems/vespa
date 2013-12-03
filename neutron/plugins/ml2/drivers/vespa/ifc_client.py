@@ -249,7 +249,7 @@ class RestClient(object):
         self.create_tenant(tenant_id)
         try:
             # Use existing BD if it's already created
-            bridge_domain = self.get_bridge_domain(bd_id, tenant_id)
+            bridge_domain = self.get_bridge_domain(tenant_id, bd_id)
         except ValueError:
             bridge_domain = self._post_mo(IFC_BD, tenant_id, bd_id)
             ensure_status(bridge_domain, IFC_BD, 'created')
