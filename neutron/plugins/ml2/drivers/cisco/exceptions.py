@@ -106,4 +106,4 @@ class ApicMoStatusChangeFailed(exceptions.StateInvalid):
 
 class ApicManagedObjectNotFound(exceptions.NotFound):
     """Managed Object not found on APIC."""
-    message = _("Managed Object '%(name)s' not found")
+    message = _("%(klass)s object '%(name)s' not found")

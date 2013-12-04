@@ -145,6 +145,11 @@ class RestClient(object):
     # REST requests
 
     @requestdata
+    def get_data(self, request):
+        """Retrieve generic data from the server."""
+        return self.session.get(self._api_url(request))
+
+    @requestdata
     def _get_mo(self, mo_class, *args):
         """Retrieve a MO by DN."""
         dn = self._mo_dn(mo_class, *args)
@@ -156,7 +161,7 @@ class RestClient(object):
         return self.session.get(self._qry_url(mo_class))
 
     @requestdata
-    def _post_data(self, request, data):
+    def post_data(self, request, data):
         """Post generic data to the server."""
         return self.session.post(self._api_url(request), data=data)
 
@@ -172,7 +177,7 @@ class RestClient(object):
     def login(self, usr, pwd):
         """Log in to server. Save user name and authentication."""
         name_pwd = self._make_data('aaaUser', name=usr, pwd=pwd)
-        self.authentication = self._post_data('aaaLogin', data=name_pwd)
+        self.authentication = self.post_data('aaaLogin', data=name_pwd)
         login_data = self.authentication[0]
         if login_data and 'error' in login_data:
             self.authentication = None
@@ -184,7 +189,7 @@ class RestClient(object):
         """End session with server."""
         if self.authentication and self.username:
             data = self._make_data('aaaUser', name=self.username)
-            bye = self._post_data('aaaLogout', data=data)
+            bye = self.post_data('aaaLogout', data=data)
             self.authentication = None
             self.username = None
             return bye
@@ -198,7 +203,7 @@ class RestClient(object):
         try:
             # Use existing tenant if it's already created
             tenant = self.get_tenant(tenant_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             tenant = self._post_mo(MO_TENANT, tenant_id)
             ensure_status(tenant, MO_TENANT, 'created')
         return tenant
@@ -206,7 +211,8 @@ class RestClient(object):
     def get_tenant(self, tenant_id):
         tenant = self._get_mo(MO_TENANT, tenant_id)
         if not tenant:
-            raise ValueError("Tenant '%s' not found" % tenant_id)
+            raise cexc.ApicManagedObjectNotFound(klass="Tenant",
+                                                 name=tenant_id)
         return tenant
 
     def list_tenants(self):
@@ -220,7 +226,7 @@ class RestClient(object):
     def delete_tenant(self, tenant_id):
         try:
             self.get_tenant(tenant_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             return True
         tenant = self._post_mo(MO_TENANT, tenant_id, status='deleted')
         ensure_status(tenant, MO_TENANT, 'deleted')
@@ -234,7 +240,7 @@ class RestClient(object):
         try:
             # Use existing BD if it's already created
             bridge_domain = self.get_bridge_domain(tenant_id, bd_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             bridge_domain = self._post_mo(MO_BD, tenant_id, bd_id)
             ensure_status(bridge_domain, MO_BD, 'created')
         return bridge_domain
@@ -243,7 +249,8 @@ class RestClient(object):
         self.get_tenant(tenant_id)  # raises if tenant not found
         bridge_domain = self._get_mo(MO_BD, tenant_id, bd_id)
         if not bridge_domain:
-            raise ValueError("Bridge Domain '%s' not found" % bd_id)
+            raise cexc.ApicManagedObjectNotFound(klass="Bridge Domain",
+                                                 name=bd_id)
         return bridge_domain
 
     def list_bridge_domains(self):
@@ -257,7 +264,7 @@ class RestClient(object):
     def delete_bridge_domain(self, tenant_id, bd_id):
         try:
             self.get_bridge_domain(tenant_id, bd_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             return True
         bridge_domain = self._post_mo(MO_BD, tenant_id, bd_id,
                                       status='deleted')
@@ -272,7 +279,7 @@ class RestClient(object):
         try:
             # Use existing subnet if it's already created
             subnet = self.get_subnet(tenant_id, bd_id, gw_ip)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             subnet = self._post_mo(MO_SUBNET, tenant_id, bd_id, gw_ip)
             ensure_status(subnet, MO_SUBNET, 'created')
         return subnet
@@ -281,7 +288,7 @@ class RestClient(object):
         self.get_tenant(tenant_id)  # raises if tenant not found
         subnet = self._get_mo(MO_SUBNET, tenant_id, bd_id, gw_ip)
         if not subnet:
-            raise ValueError("Subnet with gateway %s not found" % gw_ip)
+            raise cexc.ApicManagedObjectNotFound(klass="Subnet", name=gw_ip)
         return subnet
 
     def list_subnets(self):
@@ -295,7 +302,7 @@ class RestClient(object):
     def delete_subnet(self, tenant_id, bd_id, gw_ip):
         try:
             self.get_subnet(tenant_id, bd_id, gw_ip)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             return True
         subnet = self._post_mo(MO_SUBNET, tenant_id, bd_id, gw_ip,
                                status='deleted')
@@ -310,7 +317,7 @@ class RestClient(object):
         try:
             # Use existing profile if it's already created
             profile = self.get_app_profile(tenant_id, ap_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             profile = self._post_mo(MO_AP, tenant_id, ap_id)
             ensure_status(profile, MO_AP, 'created')
         return profile
@@ -319,7 +326,8 @@ class RestClient(object):
         self.get_tenant(tenant_id)  # raises if tenant not found
         profile = self._get_mo(MO_AP, tenant_id, ap_id)
         if not profile:
-            raise ValueError("App profile '%s' not found" % ap_id)
+            raise cexc.ApicManagedObjectNotFound(klass="Application Profile",
+                                                 name=ap_id)
         return profile
 
     def list_app_profiles(self):
@@ -333,7 +341,7 @@ class RestClient(object):
     def delete_app_profile(self, tenant_id, ap_id):
         try:
             self.get_app_profile(tenant_id, ap_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             return True
         profile = self._post_mo(MO_AP, tenant_id, ap_id, status='deleted')
         ensure_status(profile, MO_AP, 'deleted')
@@ -347,7 +355,7 @@ class RestClient(object):
         try:
             # Use existing EPG if it's already created
             epg = self.get_epg(tenant_id, ap_id, epg_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             epg = self._post_mo(MO_EPG, tenant_id, ap_id, epg_id)
             ensure_status(epg, MO_EPG, 'created')
         return epg
@@ -357,7 +365,7 @@ class RestClient(object):
         self.get_app_profile(tenant_id, ap_id)  # raises if ap_id not found
         epg = self._get_mo(MO_EPG, tenant_id, ap_id, epg_id)
         if not epg:
-            raise ValueError("EPG '%s' not found" % epg_id)
+            raise cexc.ApicManagedObjectNotFound(klass="EPG", name=epg_id)
         return epg
 
     def list_epgs(self):
@@ -371,7 +379,7 @@ class RestClient(object):
     def delete_epg(self, tenant_id, ap_id, epg_id):
         try:
             self.get_epg(tenant_id, ap_id, epg_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             return True
         epg = self._post_mo(MO_EPG, tenant_id, ap_id, epg_id, status='deleted')
         ensure_status(epg, MO_EPG, 'deleted')
@@ -385,7 +393,7 @@ class RestClient(object):
         try:
             # Use existing contract if it's already created
             contract = self.get_contract(tenant_id, contract_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             contract = self._post_mo(MO_CONTRACT, tenant_id, contract_id)
             ensure_status(contract, MO_CONTRACT, 'created')
         return contract
@@ -394,7 +402,8 @@ class RestClient(object):
         self.get_tenant(tenant_id)  # raises if tenant not found
         contract = self._get_mo(MO_CONTRACT, tenant_id, contract_id)
         if not contract:
-            raise ValueError("Contract '%s' not found" % contract_id)
+            raise cexc.ApicManagedObjectNotFound(klass="Contract",
+                                                 name=contract_id)
         return contract
 
     def list_contracts(self):
@@ -408,7 +417,7 @@ class RestClient(object):
     def delete_contract(self, tenant_id, contract_id):
         try:
             self.get_contract(tenant_id, contract_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             return True
         contract = self._post_mo(MO_CONTRACT, tenant_id, contract_id,
                             status='deleted')
@@ -423,7 +432,7 @@ class RestClient(object):
         try:
             # Use existing subject if it's already created
             subject = self.get_subject(tenant_id, contract_id, subject_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             subject = self._post_mo(MO_SUBJECT, tenant_id, contract_id,
                                     subject_id)
             ensure_status(subject, MO_SUBJECT, 'created')
@@ -433,7 +442,8 @@ class RestClient(object):
         self.get_contract(tenant_id, contract_id)  # raises if not found
         subject = self._get_mo(MO_SUBJECT, tenant_id, contract_id, subject_id)
         if not subject:
-            raise ValueError("Subject '%s' not found" % subject_id)
+            raise cexc.ApicManagedObjectNotFound(klass="Subject",
+                                                 name=subject_id)
         return subject
 
     def list_subjects(self):
@@ -448,7 +458,7 @@ class RestClient(object):
     def delete_subject(self, tenant_id, contract_id, subject_id):
         try:
             self.get_subject(tenant_id, contract_id, subject_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             return True
         subject = self._post_mo(MO_SUBJECT, tenant_id, contract_id, subject_id,
                                 status='deleted')
@@ -463,7 +473,7 @@ class RestClient(object):
         try:
             # Use existing filter if it's already created
             filter_obj = self.get_filter(tenant_id, filter_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             filter_obj = self._post_mo(MO_FILTER, tenant_id, filter_id)
             ensure_status(filter_obj, MO_FILTER, 'created')
         return filter_obj
@@ -472,7 +482,8 @@ class RestClient(object):
         self.get_tenant(tenant_id)  # raises if tenant not found
         filter_obj = self._get_mo(MO_FILTER, tenant_id, filter_id)
         if not filter_obj:
-            raise ValueError("filter '%s' not found" % filter_id)
+            raise cexc.ApicManagedObjectNotFound(klass="Filter",
+                                                 name=filter_id)
         return filter_obj
 
     def list_filters(self):
@@ -486,7 +497,7 @@ class RestClient(object):
     def delete_filter(self, tenant_id, filter_id):
         try:
             self.get_filter(tenant_id, filter_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             return True
         filter_obj = self._post_mo(MO_FILTER, tenant_id, filter_id,
                                    status='deleted')
@@ -495,41 +506,41 @@ class RestClient(object):
 
     # Entries
 
-    def create_entry(self, tenant_id, contract_id, entry_id):
-        # First ensure the contract exists (create it if it doesn't)
-        self.create_contract(tenant_id, contract_id)
+    def create_entry(self, tenant_id, filter_id, entry_id):
+        # First ensure the filter exists (create it if it doesn't)
+        self.create_filter(tenant_id, filter_id)
         try:
             # Use existing entry if it's already created
-            entry = self.get_entry(tenant_id, contract_id, entry_id)
-        except ValueError:
-            entry = self._post_mo(MO_ENTRY, tenant_id, contract_id,
-                                    entry_id)
+            entry = self.get_entry(tenant_id, filter_id, entry_id)
+        except cexc.ApicManagedObjectNotFound:
+            entry = self._post_mo(MO_ENTRY, tenant_id, filter_id,
+                                  entry_id)
             ensure_status(entry, MO_ENTRY, 'created')
         return entry
 
-    def get_entry(self, tenant_id, contract_id, entry_id):
-        self.get_contract(tenant_id, contract_id)  # raises if not found
-        entry = self._get_mo(MO_ENTRY, tenant_id, contract_id, entry_id)
+    def get_entry(self, tenant_id, filter_id, entry_id):
+        self.get_contract(tenant_id, filter_id)  # raises if not found
+        entry = self._get_mo(MO_ENTRY, tenant_id, filter_id, entry_id)
         if not entry:
-            raise ValueError("Entry '%s' not found" % entry_id)
+            raise cexc.ApicManagedObjectNotFound(klass="Entry", name=entry_id)
         return entry
 
     def list_entries(self):
         ifc_entries = self._list_mo(MO_ENTRY)
         return self._mo_names(ifc_entries, MO_ENTRY)
 
-    def update_entry(self, tenant_id, contract_id, entry_id, **attrs):
-        self.get_entry(tenant_id, contract_id, entry_id)
-        return self._post_mo(MO_ENTRY, tenant_id, contract_id, entry_id,
+    def update_entry(self, tenant_id, filter_id, entry_id, **attrs):
+        self.get_entry(tenant_id, filter_id, entry_id)
+        return self._post_mo(MO_ENTRY, tenant_id, filter_id, entry_id,
                              **attrs)
 
-    def delete_entry(self, tenant_id, contract_id, entry_id):
+    def delete_entry(self, tenant_id, filter_id, entry_id):
         try:
-            self.get_entry(tenant_id, contract_id, entry_id)
-        except ValueError:
+            self.get_entry(tenant_id, filter_id, entry_id)
+        except cexc.ApicManagedObjectNotFound:
             return True
-        entry = self._post_mo(MO_ENTRY, tenant_id, contract_id, entry_id,
-                                status='deleted')
+        entry = self._post_mo(MO_ENTRY, tenant_id, filter_id, entry_id,
+                              status='deleted')
         ensure_status(entry, MO_ENTRY, 'deleted')
         return entry
 
@@ -570,7 +581,7 @@ class ManagedObject(RestClient):
     def delete(self, tenant_id, contract_id):
         try:
             self.get_contract(tenant_id, contract_id)
-        except ValueError:
+        except cexc.ApicManagedObjectNotFound:
             return True
         contract = self._post_mo(MO_CONTRACT, tenant_id, contract_id,
                             status='deleted')

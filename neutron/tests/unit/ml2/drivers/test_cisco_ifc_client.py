@@ -52,7 +52,7 @@ class TestCiscoIfcClient(base.BaseTestCase):
 
     def test_query_top_system(self):
         s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-        top_system, ts_data = s.get('class/topSystem')
+        top_system, ts_data = s.get_data('class/topSystem')
         self.assertIsNotNone(top_system)
         self.assertEqual(top_system.status_code, 200)
         self.assertIsNotNone(top_system)
