@@ -57,6 +57,7 @@ class IFCManager(object):
         self.ifc_subnets = self.ifc.list_subnets()
         self.ifc_app_profiles = self.ifc.list_app_profiles()
         self.ifc_epgs = self.ifc.list_epgs()
+        self.ifc_filters = self.ifc.list_filters()
 
     def ensure_tenant_created_on_ifc(self, tenant_id):
         """Make sure a tenant exists on the IFC.
@@ -80,6 +81,11 @@ class IFCManager(object):
         if not subnet_id in self.ifc_subnets:
             self.ifc.create_subnet(tenant_id, bd_id, gw_ip)
             self.ifc_subnets.append(subnet_id)
+
+    def ensure_filter_created_on_ifc(self, tenant_id, filter_id):
+        if not filter_id in self.ifc_filters:
+            self.ifc.create_filter(tenant_id, filter_id)
+            self.ifc_filters.append(filter_id)
 
     def get_epg_list_from_ifc(self):
         """Get a list of all EPG's from the IFC."""
@@ -129,10 +135,16 @@ class VespaMechanismDriver(api.MechanismDriver):
         # Get security groups for the port
         secgrps = context.current['security_groups']
 
+        # Ensure all security groups are created on the IFC
+        for secgrp in secgrps:
+            self.ifc_manager.ensure_filter_created_on_ifc(tenant_id, secgrp)
+            # Ensure entries have been created for each rule
+
         # Check if the combination of security group + network exists
         # already  as an EPG
         epg = self.ifc_manager.search_for_epg_with_net_and_secgroups(network,
-                                                                     secgrps)                                                    
+                                                                     secgrps)
+
         if not epg:
             # Create a new EPG with this network and security group
             epg = self.ifc_manager.create_epg_with_net_and_secgroups(network,
