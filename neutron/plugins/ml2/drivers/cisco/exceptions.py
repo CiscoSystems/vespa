@@ -77,24 +77,33 @@ class PortIdForNexusSvi(exceptions.NeutronException):
         """Port Id specified for Nexus SVI."""
         message = _('Nexus hardware router gateway only uses Subnet Ids.')
 
-class IfcHostNoResponse(exceptions.NotFound):
-    """No response from the IFC via the specified URL."""
-    message = _("No response from IFC at %(url)s")
+
+class ApicHostNoResponse(exceptions.NotFound):
+    """No response from the APIC via the specified URL."""
+    message = _("No response from APIC at %(url)s")
 
 
-class IfcResponseNotOk(exceptions.NeutronException):
-    """A response from the IFC was not HTTP OK."""
-    message = _("IFC responded to %(request)s request with code "
+class ApicResponseNotOk(exceptions.NeutronException):
+    """A response from the APIC was not HTTP OK."""
+    message = _("APIC responded to %(request)s request with code "
                 "%(status_code)s: '%(reason)s'")
 
 
-class IfcLoginFailed(exceptions.NotAuthorized):
-    message = _("Failed to log in to IFC as user %(user)s")
+class ApicLoginFailed(exceptions.NotAuthorized):
+    """Failed to log in to APIC."""
+    message = _("Failed to log in to APIC as user %(user)s")
 
 
-class IfcSessionNotLoggedIn(exceptions.NotAuthorized):
-    message = _("Authorized IFC session not established")
+class ApicSessionNotLoggedIn(exceptions.NotAuthorized):
+    """Attempted APIC operation while not logged in to APIC."""
+    message = _("Authorized APIC session not established")
 
 
-class IfcMoStatusChangeFailed(exceptions.StateInvalid):
+class ApicMoStatusChangeFailed(exceptions.StateInvalid):
+    """Failed to create or delete a managed object."""
     message = _("Managed Object %(mo_class)s '%(name)s' not %(status)")
+
+
+class ApicManagedObjectNotFound(exceptions.NotFound):
+    """Managed Object not found on APIC."""
+    message = _("Managed Object '%(name)s' not found")
