@@ -86,7 +86,7 @@ class ApicHostNoResponse(exceptions.NotFound):
 class ApicResponseNotOk(exceptions.NeutronException):
     """A response from the APIC was not HTTP OK."""
     message = _("APIC responded to %(request)s request with code "
-                "%(status_code)s: '%(reason)s'")
+                "%(status_code)s: %(reason)s, %(text)s")
 
 
 class ApicLoginFailed(exceptions.NotAuthorized):

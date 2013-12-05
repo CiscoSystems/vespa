@@ -83,13 +83,15 @@ def requestdata(request_func):
         if not self.username and self.authentication:
             raise cexc.ApicSessionNotLoggedIn
         response = request_func(self, *args, **kwargs)
-        if not response:
+        if response is None:
             raise cexc.ApicHostNoResponse(url=args[0])
+        imdata = unicode2str(response.json()).get('imdata')
         if response.status_code != wexc.HTTPOk.code:
+            err_text = imdata[0]['error']['attributes']['text']
             raise cexc.ApicResponseNotOk(request=args[0],
                                         status_code=response.status_code,
-                                        reason=response.reason)
-        return unicode2str(response.json()).get('imdata')
+                                        reason=response.reason, text=err_text)
+        return imdata
     return wrapper
 
 
@@ -519,7 +521,7 @@ class RestClient(object):
         return entry
 
     def get_entry(self, tenant_id, filter_id, entry_id):
-        self.get_contract(tenant_id, filter_id)  # raises if not found
+        self.get_filter(tenant_id, filter_id)  # raises if not found
         entry = self._get_mo(MO_ENTRY, tenant_id, filter_id, entry_id)
         if not entry:
             raise cexc.ApicManagedObjectNotFound(klass="Entry", name=entry_id)
