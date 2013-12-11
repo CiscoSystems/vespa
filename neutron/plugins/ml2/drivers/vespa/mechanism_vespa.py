@@ -52,12 +52,12 @@ class IFCManager(object):
         self.ifc = ifc_client.RestClient(host, port, username, password)
 
         # Update lists of managed objects from the IFC
-        self.ifc_tenants = self.ifc.list_tenants()
-        self.ifc_bridge_domains = self.ifc.list_bridge_domains()
-        self.ifc_subnets = self.ifc.list_subnets()
-        self.ifc_app_profiles = self.ifc.list_app_profiles()
-        self.ifc_epgs = self.ifc.list_epgs()
-        self.ifc_filters = self.ifc.list_filters()
+        self.ifc_tenants = self.ifc.tenant.list_all()
+        self.ifc_bridge_domains = self.ifc.bridge_domain.list_all()
+        self.ifc_subnets = self.ifc.subnet.list_all()
+        self.ifc_app_profiles = self.ifc.app_profile.list_all()
+        self.ifc_epgs = self.ifc.epg.list_all()
+        self.ifc_filters = self.ifc.filter.list_all()
 
     def ensure_tenant_created_on_ifc(self, tenant_id):
         """Make sure a tenant exists on the IFC.
@@ -66,30 +66,30 @@ class IFCManager(object):
         if not found
         """
         if not tenant_id in self.ifc_tenants:
-            self.ifc.create_tenant(tenant_id)
+            self.ifc.tenant.create(tenant_id)
             self.ifc_tenants.append(tenant_id)
 
     def ensure_bd_created_on_ifc(self, tenant_id, bd_id):
         if not bd_id in self.ifc_bridge_domains:
-            self.ifc.create_bridge_domain(tenant_id, bd_id)
+            self.ifc.bridge_domain.create(tenant_id, bd_id)
             self.ifc_bridge_domains.append(bd_id)
 
     def delete_bd_on_ifc(self, tenant_id, bd_id):
-        self.ifc.delete_bridge_domain(tenant_id, bd_id)
+        self.ifc.bridge_domain.delete(tenant_id, bd_id)
 
     def ensure_subnet_created_on_ifc(self, tenant_id, bd_id, subnet_id, gw_ip):
         if not subnet_id in self.ifc_subnets:
-            self.ifc.create_subnet(tenant_id, bd_id, gw_ip)
+            self.ifc.subnet.create(tenant_id, bd_id, gw_ip)
             self.ifc_subnets.append(subnet_id)
 
     def ensure_filter_created_on_ifc(self, tenant_id, filter_id):
         if not filter_id in self.ifc_filters:
-            self.ifc.create_filter(tenant_id, filter_id)
+            self.ifc.filter.create(tenant_id, filter_id)
             self.ifc_filters.append(filter_id)
 
     def get_epg_list_from_ifc(self):
         """Get a list of all EPG's from the IFC."""
-        self.ifc_epgs = self.ifc.list_epgs()
+        self.ifc_epgs = self.ifc.epg.list_all()
 
     def search_for_epg_with_net_and_secgroups(self, network_id,
                                               security_groups):
@@ -103,6 +103,7 @@ class IFCManager(object):
     def create_epg_with_net_and_secgroups(self, network_id,
                                           security_groups):
         pass
+
 
 class VespaMechanismDriver(api.MechanismDriver):
     def initialize(self):
