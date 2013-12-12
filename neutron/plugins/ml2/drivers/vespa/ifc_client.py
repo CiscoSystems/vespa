@@ -25,7 +25,8 @@ from neutron.plugins.ml2.drivers.cisco import exceptions as cexc
 MO_TENANT = 'fvTenant'
 MO_BD = 'fvBD'
 MO_SUBNET = 'fvSubnet'
-MO_L3CTX = 'fvCtx'
+MO_CTX = 'fvCtx'
+MO_RSCTX = 'fvRsCtx'
 MO_AP = 'fvAp'
 MO_EPG = 'fvAEPg'
 
@@ -40,7 +41,8 @@ mop = {
     MO_TENANT: MoProperty('tn-%s', None),
     MO_BD: MoProperty('BD-%s', MO_TENANT),
     MO_SUBNET: MoProperty('subnet-[%s]', MO_BD),
-    MO_L3CTX: MoProperty('ctx-%s', MO_TENANT),
+    MO_CTX: MoProperty('ctx-%s', MO_TENANT),
+    MO_RSCTX: MoProperty('rsctx', MO_BD),
     MO_AP: MoProperty('ap-%s', MO_TENANT),
     MO_EPG: MoProperty('epg-%s', MO_AP),
     MO_CONTRACT: MoProperty('brc-%s', MO_TENANT),
@@ -198,7 +200,7 @@ class ManagedObject(ApicSession, MoProperties):
     def _create_prereqs(self, *params):
         if self.container:
             prereq = ManagedObject(self.client, self.container)
-            prereq.create(*(params[0:-1]))
+            prereq.create(*(params[0: prereq.dn_fmt.count('%s')]))
 
     def create(self, *params, **attrs):
         self._create_prereqs(*params)
@@ -264,7 +266,8 @@ class RestClient(ApicSession):
         self.tenant = ManagedObject(self, MO_TENANT)
         self.bridge_domain = ManagedObject(self, MO_BD)
         self.subnet = ManagedObject(self, MO_SUBNET)
-        self.l3ctx = ManagedObject(self, MO_L3CTX)
+        self.ctx = ManagedObject(self, MO_CTX)
+        self.rsctx = ManagedObject(self, MO_RSCTX)
         self.app_profile = ManagedObject(self, MO_AP)
         self.epg = ManagedObject(self, MO_EPG)
         self.contract = ManagedObject(self, MO_CONTRACT)

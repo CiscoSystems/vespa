@@ -146,6 +146,14 @@ class TestCiscoIfcClient(base.BaseTestCase):
 
     def test_create_bd_with_subnet_and_l3ctx(self):
         s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
+        try:
+            s.rsctx.delete(TEST_TENANT, TEST_NETWORK)
+        except Exception:
+            pass
+        try:
+            s.ctx.create(TEST_TENANT, TEST_L3CTX)
+        except Exception:
+            pass
         new_sn = s.subnet.create(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
         self.assertIsNotNone(new_sn)
         tenant = s.tenant.get(TEST_TENANT)
@@ -155,13 +163,20 @@ class TestCiscoIfcClient(base.BaseTestCase):
         sn = s.subnet.get(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
         self.assertIsNotNone(sn)
         # create l3ctx on tenant
-        new_l3ctx = s.l3ctx.create(TEST_TENANT, TEST_L3CTX)
+        new_l3ctx = s.ctx.create(TEST_TENANT, TEST_L3CTX)
         self.assertIsNotNone(new_l3ctx)
-        l3c = s.l3ctx.get(TEST_TENANT, TEST_L3CTX)
+        l3c = s.ctx.get(TEST_TENANT, TEST_L3CTX)
         self.assertIsNotNone(l3c)
-        # assocate l3ctx with BD  # TODO: how?
-        # bd = s.bridge_domain.update(TEST_TENANT, TEST_NETWORK, ...)
-        s.l3ctx.delete(TEST_TENANT, TEST_NETWORK, TEST_L3CTX)
+        # assocate l3ctx with TEST_NETWORK
+        new_rsctx = s.rsctx.create(TEST_TENANT, TEST_NETWORK)
+        self.assertIsNotNone(new_rsctx)
+        rsctx = s.rsctx.update(TEST_TENANT, TEST_NETWORK,
+                               tnFvCtxName=TEST_L3CTX)
+        self.assertIsNotNone(rsctx)
+        bd = s.bridge_domain.get(TEST_TENANT, TEST_NETWORK)
+        self.assertIsNotNone(bd)
+        # delete l3ctx
+        s.ctx.delete(TEST_TENANT, TEST_L3CTX)
         # tenant and BD should still exist
         tenant = s.tenant.get(TEST_TENANT)
         self.assertIsNotNone(tenant)
