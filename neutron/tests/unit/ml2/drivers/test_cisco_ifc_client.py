@@ -49,205 +49,204 @@ class TestCiscoIfcClient(base.BaseTestCase):
         docstring
         """
         super(TestCiscoIfcClient, self).setUp()
+        self.apic = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
+        self.addCleanup(self.sign_out)
         #self.addCleanup(mock.patch.stopall)
 
+    def sign_out(self):
+        signed_out = self.apic.logout()
+        self.assertIsNotNone(signed_out)
+        self.assertIsNone(self.apic.authentication)
+
+    def delete_test_objects(self):
+        """In case previous test attempts didn't clean up."""
+        try:
+            self.apic.bridge_domain.delete(TEST_TENANT, TEST_NETWORK)
+        except cexc.ApicManagedObjectNotFound:
+            pass
+        try:
+            self.apic.rsctx.delete(TEST_TENANT, TEST_NETWORK)
+        except cexc.ApicManagedObjectNotFound:
+            pass
+        try:
+            self.apic.ctx.create(TEST_TENANT, TEST_L3CTX)
+        except cexc.ApicManagedObjectNotFound:
+            pass
+        try:
+            self.apic.tenant.delete(TEST_TENANT)
+        except cexc.ApicManagedObjectNotFound:
+            pass
+
     def test_cisco_ifc_client_session(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-        self.assertIsNotNone(s.authentication)
-        s.logout()
-        self.assertIsNone(s.authentication)
+        self.delete_test_objects()
+        self.assertIsNotNone(self.apic.authentication)
 
     def test_query_top_system(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-        top_system, ts_data = s.get_data('class/topSystem')
+        top_system = self.apic.get_data('class/topSystem')
         self.assertIsNotNone(top_system)
-        self.assertEqual(top_system.status_code, 200)
-        self.assertIsNotNone(top_system)
-        self.assertIsNotNone(ts_data)
-        self.assertEqual(len(ts_data), 1)
-        self.assertIn('topSystem', ts_data[0])
-        signed_out = s.logout()
-        self.assertTrue(signed_out)
-        self.assertIsNone(s.authentication)
+        name = top_system[0]['topSystem']['attributes']['name']
+        self.assertEqual(name, 'ifc1')
 
     def test_lookup_nonexistant_tenant(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
         self.assertRaises(cexc.ApicManagedObjectNotFound,
-                          s.tenant.get, TEST_TENANT)
+                          self.apic.tenant.get, TEST_TENANT)
 
     def test_lookup_existing_tenant(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-        tenant = s.tenant.get('infra')
+        tenant = self.apic.tenant.get('infra')
         self.assertEqual(tenant[0]['fvTenant']['attributes']['name'], 'infra')
 
     def test_create_and_lookup_tenant(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
         try:
-            s.tenant.get(TEST_TENANT)
-            s.tenant.delete(TEST_TENANT)
+            self.apic.tenant.get(TEST_TENANT)
+            self.apic.tenant.delete(TEST_TENANT)
         except cexc.ApicManagedObjectNotFound:
             pass
-        new_tenant = s.tenant.create(TEST_TENANT)
+        new_tenant = self.apic.tenant.create(TEST_TENANT)
         self.assertIsNotNone(new_tenant)
-        s.tenant.delete(TEST_TENANT)
+        self.apic.tenant.delete(TEST_TENANT)
         self.assertRaises(cexc.ApicManagedObjectNotFound,
-                          s.tenant.get, TEST_TENANT)
+                          self.apic.tenant.get, TEST_TENANT)
 
     def test_lookup_nonexistant_network(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-        self.assertRaises(cexc.ApicManagedObjectNotFound, s.bridge_domain.get,
+        self.assertRaises(cexc.ApicManagedObjectNotFound,
+                          self.apic.bridge_domain.get,
                           'LarryKing', 'CableNews')
 
     def test_create_and_lookup_network(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
         try:
-            s.bridge_domain.get(TEST_TENANT, TEST_NETWORK)
-            s.bridge_domain.delete(TEST_TENANT, TEST_NETWORK)
+            self.apic.bridge_domain.get(TEST_TENANT, TEST_NETWORK)
+            self.apic.bridge_domain.delete(TEST_TENANT, TEST_NETWORK)
         except cexc.ApicManagedObjectNotFound:
             pass
         try:
-            s.tenant.get(TEST_TENANT)
-            s.tenant.delete(TEST_TENANT)
+            self.apic.tenant.get(TEST_TENANT)
+            self.apic.tenant.delete(TEST_TENANT)
         except cexc.ApicManagedObjectNotFound:
             pass
-        new_network = s.bridge_domain.create(TEST_TENANT, TEST_NETWORK)
+        new_network = self.apic.bridge_domain.create(TEST_TENANT, TEST_NETWORK)
         self.assertIsNotNone(new_network)
-        tenant = s.tenant.get(TEST_TENANT)
+        tenant = self.apic.tenant.get(TEST_TENANT)
         self.assertIsNotNone(tenant)
-        s.bridge_domain.delete(TEST_TENANT, TEST_NETWORK)
-        self.assertRaises(cexc.ApicManagedObjectNotFound, s.bridge_domain.get,
-                          TEST_TENANT, TEST_NETWORK)
-        s.tenant.delete(TEST_TENANT)
+        self.apic.bridge_domain.delete(TEST_TENANT, TEST_NETWORK)
         self.assertRaises(cexc.ApicManagedObjectNotFound,
-                          s.tenant.get, TEST_TENANT)
+                          self.apic.bridge_domain.get,
+                          TEST_TENANT, TEST_NETWORK)
+        self.apic.tenant.delete(TEST_TENANT)
+        self.assertRaises(cexc.ApicManagedObjectNotFound,
+                          self.apic.tenant.get, TEST_TENANT)
 
     def test_create_and_lookup_subnet(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
         try:
-            s.subnet.get(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
-            s.subnet.delete(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
+            self.apic.subnet.get(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
+            self.apic.subnet.delete(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
         except cexc.ApicManagedObjectNotFound:
             pass
         try:
-            s.tenant.get(TEST_TENANT)
-            s.tenant.delete(TEST_TENANT)
+            self.apic.tenant.get(TEST_TENANT)
+            self.apic.tenant.delete(TEST_TENANT)
         except cexc.ApicManagedObjectNotFound:
             pass
-        new_sn = s.subnet.create(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
+        new_sn = self.apic.subnet.create(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
         self.assertIsNotNone(new_sn)
-        tenant = s.tenant.get(TEST_TENANT)
+        tenant = self.apic.tenant.get(TEST_TENANT)
         self.assertIsNotNone(tenant)
-        s.subnet.delete(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
-        self.assertRaises(cexc.ApicManagedObjectNotFound, s.subnet.get,
+        self.apic.subnet.delete(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
+        self.assertRaises(cexc.ApicManagedObjectNotFound, self.apic.subnet.get,
                           TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
-        s.tenant.delete(TEST_TENANT)
+        self.apic.tenant.delete(TEST_TENANT)
         self.assertRaises(cexc.ApicManagedObjectNotFound,
-                          s.tenant.get, TEST_TENANT)
+                          self.apic.tenant.get, TEST_TENANT)
 
     def test_create_bd_with_subnet_and_l3ctx(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-        try:
-            s.rsctx.delete(TEST_TENANT, TEST_NETWORK)
-        except Exception:
-            pass
-        try:
-            s.ctx.create(TEST_TENANT, TEST_L3CTX)
-        except Exception:
-            pass
-        new_sn = s.subnet.create(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
+        self.delete_test_objects()
+        new_sn = self.apic.subnet.create(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
         self.assertIsNotNone(new_sn)
-        tenant = s.tenant.get(TEST_TENANT)
+        tenant = self.apic.tenant.get(TEST_TENANT)
         self.assertIsNotNone(tenant)
-        bd = s.bridge_domain.get(TEST_TENANT, TEST_NETWORK)
+        bd = self.apic.bridge_domain.get(TEST_TENANT, TEST_NETWORK)
         self.assertIsNotNone(bd)
-        sn = s.subnet.get(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
+        sn = self.apic.subnet.get(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
         self.assertIsNotNone(sn)
         # create l3ctx on tenant
-        new_l3ctx = s.ctx.create(TEST_TENANT, TEST_L3CTX)
+        new_l3ctx = self.apic.ctx.create(TEST_TENANT, TEST_L3CTX)
         self.assertIsNotNone(new_l3ctx)
-        l3c = s.ctx.get(TEST_TENANT, TEST_L3CTX)
+        l3c = self.apic.ctx.get(TEST_TENANT, TEST_L3CTX)
         self.assertIsNotNone(l3c)
         # assocate l3ctx with TEST_NETWORK
-        new_rsctx = s.rsctx.create(TEST_TENANT, TEST_NETWORK)
+        new_rsctx = self.apic.rsctx.create(TEST_TENANT, TEST_NETWORK)
         self.assertIsNotNone(new_rsctx)
-        rsctx = s.rsctx.update(TEST_TENANT, TEST_NETWORK,
+        rsctx = self.apic.rsctx.update(TEST_TENANT, TEST_NETWORK,
                                tnFvCtxName=TEST_L3CTX)
         self.assertIsNotNone(rsctx)
-        bd = s.bridge_domain.get(TEST_TENANT, TEST_NETWORK)
+        bd = self.apic.bridge_domain.get(TEST_TENANT, TEST_NETWORK)
         self.assertIsNotNone(bd)
         # delete l3ctx
-        s.ctx.delete(TEST_TENANT, TEST_L3CTX)
+        self.apic.ctx.delete(TEST_TENANT, TEST_L3CTX)
         # tenant and BD should still exist
-        tenant = s.tenant.get(TEST_TENANT)
+        tenant = self.apic.tenant.get(TEST_TENANT)
         self.assertIsNotNone(tenant)
-        bd = s.bridge_domain.get(TEST_TENANT, TEST_NETWORK)
+        bd = self.apic.bridge_domain.get(TEST_TENANT, TEST_NETWORK)
         self.assertIsNotNone(bd)
-        s.subnet.delete(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
-        self.assertRaises(cexc.ApicManagedObjectNotFound, s.subnet.get,
+        self.apic.subnet.delete(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
+        self.assertRaises(cexc.ApicManagedObjectNotFound, self.apic.subnet.get,
                           TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
-        s.tenant.delete(TEST_TENANT)
+        self.apic.tenant.delete(TEST_TENANT)
         self.assertRaises(cexc.ApicManagedObjectNotFound,
-                          s.tenant.get, TEST_TENANT)
+                          self.apic.tenant.get, TEST_TENANT)
 
     def test_list_tenants(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-        tlist = s.tenant.list_all()
+        tlist = self.apic.tenant.list_all()
         self.assertIsNotNone(tlist)
 
     def test_list_networks(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-        nlist = s.bridge_domain.list_all()
+        nlist = self.apic.bridge_domain.list_all()
         self.assertIsNotNone(nlist)
 
     def test_list_subnets(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-        snlist = s.subnet.list_all()
+        snlist = self.apic.subnet.list_all()
         self.assertIsNotNone(snlist)
 
     def test_list_app_profiles(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-        aplist = s.app_profile.list_all()
+        aplist = self.apic.app_profile.list_all()
         self.assertIsNotNone(aplist)
 
     def test_list_epgs(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-        elist = s.epg.list_all()
+        elist = self.apic.epg.list_all()
         self.assertIsNotNone(elist)
 
     def test_create_and_lookup_contract(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-        new_contract = s.contract.create(TEST_TENANT, TEST_CONTRACT)
+        new_contract = self.apic.contract.create(TEST_TENANT, TEST_CONTRACT)
         self.assertIsNotNone(new_contract)
-        tenant = s.tenant.get(TEST_TENANT)
+        tenant = self.apic.tenant.get(TEST_TENANT)
         self.assertIsNotNone(tenant)
-        s.contract.delete(TEST_TENANT, TEST_CONTRACT)
-        self.assertRaises(cexc.ApicManagedObjectNotFound, s.contract.get,
-                          TEST_TENANT, TEST_CONTRACT)
-        s.tenant.delete(TEST_TENANT)
+        self.apic.contract.delete(TEST_TENANT, TEST_CONTRACT)
         self.assertRaises(cexc.ApicManagedObjectNotFound,
-                          s.tenant.get, TEST_TENANT)
+                          self.apic.contract.get,
+                          TEST_TENANT, TEST_CONTRACT)
+        self.apic.tenant.delete(TEST_TENANT)
+        self.assertRaises(cexc.ApicManagedObjectNotFound,
+                          self.apic.tenant.get, TEST_TENANT)
 
     def test_create_and_lookup_entry(self):
-        s = ifc.RestClient(TEST_HOST, TEST_PORT, TEST_USR, TEST_PWD)
         try:
-            s.entry.get(TEST_TENANT, TEST_FILTER, TEST_ENTRY)
-            s.entry.delete(TEST_TENANT, TEST_FILTER, TEST_ENTRY)
+            self.apic.entry.get(TEST_TENANT, TEST_FILTER, TEST_ENTRY)
+            self.apic.entry.delete(TEST_TENANT, TEST_FILTER, TEST_ENTRY)
         except cexc.ApicManagedObjectNotFound:
             pass
         try:
-            s.tenant.get(TEST_TENANT)
-            s.tenant.delete(TEST_TENANT)
+            self.apic.tenant.get(TEST_TENANT)
+            self.apic.tenant.delete(TEST_TENANT)
         except cexc.ApicManagedObjectNotFound:
             pass
-        new_sn = s.entry.create(TEST_TENANT, TEST_FILTER, TEST_ENTRY)
+        new_sn = self.apic.entry.create(TEST_TENANT, TEST_FILTER, TEST_ENTRY)
         self.assertIsNotNone(new_sn)
-        tenant = s.tenant.get(TEST_TENANT)
+        tenant = self.apic.tenant.get(TEST_TENANT)
         self.assertIsNotNone(tenant)
-        s.entry.update(TEST_TENANT, TEST_FILTER, TEST_ENTRY,
+        self.apic.entry.update(TEST_TENANT, TEST_FILTER, TEST_ENTRY,
                        prot='udp', dToPort='pop3')
-        s.entry.delete(TEST_TENANT, TEST_FILTER, TEST_ENTRY)
-        self.assertRaises(cexc.ApicManagedObjectNotFound, s.entry.get,
+        self.apic.entry.delete(TEST_TENANT, TEST_FILTER, TEST_ENTRY)
+        self.assertRaises(cexc.ApicManagedObjectNotFound, self.apic.entry.get,
                           TEST_TENANT, TEST_FILTER, TEST_ENTRY)
-        s.tenant.delete(TEST_TENANT)
+        self.apic.tenant.delete(TEST_TENANT)
         self.assertRaises(cexc.ApicManagedObjectNotFound,
-                          s.tenant.get, TEST_TENANT)
+                          self.apic.tenant.get, TEST_TENANT)

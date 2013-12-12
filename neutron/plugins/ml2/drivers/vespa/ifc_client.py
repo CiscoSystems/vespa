@@ -33,7 +33,10 @@ MO_EPG = 'fvAEPg'
 MO_CONTRACT = 'vzBrCP'
 MO_SUBJECT = 'vzSubj'
 MO_FILTER = 'vzFilter'
+MO_RSFILTATT = 'vzRsFiltAtt'
 MO_ENTRY = 'vzEntry'
+MO_INTERM = 'vzInTerm'
+MO_OUTTERM = 'vzOutTerm'
 
 MoProperty = namedtuple('MoProperty', 'rn_fmt container')
 
@@ -48,7 +51,10 @@ mop = {
     MO_CONTRACT: MoProperty('brc-%s', MO_TENANT),
     MO_SUBJECT: MoProperty('subj-%s', MO_CONTRACT),
     MO_FILTER: MoProperty('flt-%s', MO_TENANT),
+    MO_RSFILTATT: MoProperty('rsfiltAtt-%s', MO_SUBJECT),
     MO_ENTRY: MoProperty('e-%s', MO_FILTER),
+    MO_INTERM: MoProperty('intmnl', MO_SUBJECT),
+    MO_OUTTERM: MoProperty('outtmnl', MO_SUBJECT),
 }
 
 
@@ -62,9 +68,11 @@ class MoProperties(object):
         self.dn_fmt = self._dn_fmt()
 
     def _dn_fmt(self):
-        """Recursively build the DN format using class and container.
+        """
+        Recursively build the DN format using class and container.
 
-        Note: Call this method only once at init."""
+        Note: Call this method only once at init.
+        """
         if self.container:
             return '/'.join([MoProperties(self.container).dn_fmt,
                              self.rn_fmt])
@@ -78,6 +86,9 @@ class MoProperties(object):
     def ux_name(*params):
         """Name for user-readable display in errors, logs, etc."""
         return ', '.join(params)  # TODO(Henry): something nicer?
+
+    def attr(self, mo, key):
+        return mo[0][self.mo_class]['attributes'][key]
 
 
 def unicode2str(data):
@@ -192,8 +203,8 @@ class ManagedObject(ApicSession, MoProperties):
 
     def _ensure_status(self, mo, status):
         """Ensure that the status of a Managed Object is as expected."""
-        if mo[0][self.mo_class]['attributes']['status'] != status:
-            name = mo[0][self.mo_class]['attributes']['name']
+        if self.attr(mo, 'status') != status:
+            name = self.attr(mo, 'name')
             raise cexc.ApicMoStatusChangeFailed(
                 mo_class=self.mo_class, name=name, status=status)
 
@@ -273,7 +284,10 @@ class RestClient(ApicSession):
         self.contract = ManagedObject(self, MO_CONTRACT)
         self.subject = ManagedObject(self, MO_SUBJECT)
         self.filter = ManagedObject(self, MO_FILTER)
+        self.filter_attr = ManagedObject(self, MO_RSFILTATT)
         self.entry = ManagedObject(self, MO_ENTRY)
+        self.in_terminal = ManagedObject(self, MO_INTERM)
+        self.out_terminal = ManagedObject(self, MO_OUTTERM)
 
     def login(self, usr, pwd):
         """Log in to server. Save user name and authentication."""
