@@ -76,3 +76,34 @@ class SubnetInterfacePresent(exceptions.NeutronException):
 class PortIdForNexusSvi(exceptions.NeutronException):
         """Port Id specified for Nexus SVI."""
         message = _('Nexus hardware router gateway only uses Subnet Ids.')
+
+
+class ApicHostNoResponse(exceptions.NotFound):
+    """No response from the APIC via the specified URL."""
+    message = _("No response from APIC at %(url)s")
+
+
+class ApicResponseNotOk(exceptions.NeutronException):
+    """A response from the APIC was not HTTP OK."""
+    message = _("APIC responded to %(request)s request with code "
+                "%(status_code)s: %(reason)s, %(text)s")
+
+
+class ApicLoginFailed(exceptions.NotAuthorized):
+    """Failed to log in to APIC."""
+    message = _("Failed to log in to APIC as user %(user)s")
+
+
+class ApicSessionNotLoggedIn(exceptions.NotAuthorized):
+    """Attempted APIC operation while not logged in to APIC."""
+    message = _("Authorized APIC session not established")
+
+
+class ApicMoStatusChangeFailed(exceptions.StateInvalid):
+    """Failed to create or delete a managed object."""
+    message = _("Managed Object %(mo_class)s '%(name)s' not %(status)")
+
+
+class ApicManagedObjectNotFound(exceptions.NotFound):
+    """Managed Object not found on APIC."""
+    message = _("%(klass)s object '%(name)s' not found")

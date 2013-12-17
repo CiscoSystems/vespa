@@ -16,7 +16,7 @@
 
 from neutron.common import log
 from neutron.plugins.ml2.drivers.cisco import exceptions as cexc
-from neutron.plugins.ml2.drivers.vespa import apic_client as apic
+from neutron.plugins.ml2.drivers.apic import apic_client as apic
 from neutron.tests import base
 
 
