@@ -65,7 +65,7 @@ class TestCiscoIfcClient(base.BaseTestCase):
         except cexc.ApicManagedObjectNotFound:
             pass
         try:
-            self.apic.rsctx.delete(TEST_TENANT, TEST_NETWORK)
+            self.apic.rs_ctx.delete(TEST_TENANT, TEST_NETWORK)
         except cexc.ApicManagedObjectNotFound:
             pass
         try:
@@ -173,9 +173,9 @@ class TestCiscoIfcClient(base.BaseTestCase):
         l3c = self.apic.ctx.get(TEST_TENANT, TEST_L3CTX)
         self.assertIsNotNone(l3c)
         # assocate l3ctx with TEST_NETWORK
-        new_rsctx = self.apic.rsctx.create(TEST_TENANT, TEST_NETWORK)
+        new_rsctx = self.apic.rs_ctx.create(TEST_TENANT, TEST_NETWORK)
         self.assertIsNotNone(new_rsctx)
-        rsctx = self.apic.rsctx.update(TEST_TENANT, TEST_NETWORK,
+        rsctx = self.apic.rs_ctx.update(TEST_TENANT, TEST_NETWORK,
                                tnFvCtxName=TEST_L3CTX)
         self.assertIsNotNone(rsctx)
         bd = self.apic.bridge_domain.get(TEST_TENANT, TEST_NETWORK)

@@ -24,11 +24,15 @@ from neutron.plugins.ml2.drivers.cisco import exceptions as cexc
 
 MO_TENANT = 'fvTenant'
 MO_BD = 'fvBD'
+MO_RSBD = 'fvRsBd'
 MO_SUBNET = 'fvSubnet'
 MO_CTX = 'fvCtx'
 MO_RSCTX = 'fvRsCtx'
 MO_AP = 'fvAp'
 MO_EPG = 'fvAEPg'
+MO_RSPROV = 'fvRsProv'
+MO_RSCONS = 'fvRsCons'
+MO_RSDOMATT = 'fvRsDomAtt'
 
 MO_CONTRACT = 'vzBrCP'
 MO_SUBJECT = 'vzSubj'
@@ -43,11 +47,15 @@ MoProperty = namedtuple('MoProperty', 'rn_fmt container')
 mop = {
     MO_TENANT: MoProperty('tn-%s', None),
     MO_BD: MoProperty('BD-%s', MO_TENANT),
+    MO_RSBD: MoProperty('rsbd', MO_EPG),
     MO_SUBNET: MoProperty('subnet-[%s]', MO_BD),
     MO_CTX: MoProperty('ctx-%s', MO_TENANT),
     MO_RSCTX: MoProperty('rsctx', MO_BD),
     MO_AP: MoProperty('ap-%s', MO_TENANT),
     MO_EPG: MoProperty('epg-%s', MO_AP),
+    MO_RSPROV: MoProperty('rsprov-%s', MO_EPG),
+    MO_RSCONS: MoProperty('rscons-%s', MO_EPG),
+    MO_RSDOMATT: MoProperty('rsdomatt-%s', MO_EPG),
     MO_CONTRACT: MoProperty('brc-%s', MO_TENANT),
     MO_SUBJECT: MoProperty('subj-%s', MO_CONTRACT),
     MO_FILTER: MoProperty('flt-%s', MO_TENANT),
@@ -69,7 +77,7 @@ class MoProperties(object):
 
     def _dn_fmt(self):
         """
-        Recursively build the DN format using class and container.
+        Recursively build the DN format using container and RN.
 
         Note: Call this method only once at init.
         """
@@ -167,7 +175,8 @@ class ApicSession(object):
     @requestdata
     def get_data(self, request):
         """Retrieve generic data from the server."""
-        return self.session.get(self._api_url(request))
+        url = self._api_url(request)
+        return self.session.get(url)
 
     @requestdata
     def _get_mo(self, mo_class, *args):
@@ -179,12 +188,14 @@ class ApicSession(object):
     @requestdata
     def _list_mo(self, mo_class):
         """Retrieve the list of MOs for a class."""
-        return self.session.get(self._qry_url(mo_class))
+        url = self._qry_url(mo_class)
+        return self.session.get(url)
 
     @requestdata
     def post_data(self, request, data):
         """Post generic data to the server."""
-        return self.session.post(self._api_url(request), data=data)
+        url = self._api_url(request)
+        return self.session.post(url, data=data)
 
     @requestdata
     def _post_mo(self, mo_class, *args, **data):
@@ -276,11 +287,15 @@ class RestClient(ApicSession):
         # Supported objects
         self.tenant = ManagedObject(self, MO_TENANT)
         self.bridge_domain = ManagedObject(self, MO_BD)
+        self.rs_bd = ManagedObject(self, MO_RSBD)
         self.subnet = ManagedObject(self, MO_SUBNET)
         self.ctx = ManagedObject(self, MO_CTX)
-        self.rsctx = ManagedObject(self, MO_RSCTX)
+        self.rs_ctx = ManagedObject(self, MO_RSCTX)
         self.app_profile = ManagedObject(self, MO_AP)
         self.epg = ManagedObject(self, MO_EPG)
+        self.rs_prov = ManagedObject(self, MO_RSPROV)
+        self.rs_cons = ManagedObject(self, MO_RSCONS)
+        self.rs_dom_att = ManagedObject(self, MO_RSDOMATT)
         self.contract = ManagedObject(self, MO_CONTRACT)
         self.subject = ManagedObject(self, MO_SUBJECT)
         self.filter = ManagedObject(self, MO_FILTER)
