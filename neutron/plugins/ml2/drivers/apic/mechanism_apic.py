@@ -66,12 +66,12 @@ class APICManager(object):
         self.apic = apic_client.RestClient(host, port, username, password)
 
         # Update lists of managed objects from the APIC
-        self.apic_tenants = self.apic.tenant.list_all()
-        self.apic_bridge_domains = self.apic.bridge_domain.list_all()
-        self.apic_subnets = self.apic.subnet.list_all()
-        self.apic_app_profiles = self.apic.app_profile.list_all()
-        self.apic_epgs = self.apic.epg.list_all()
-        self.apic_filters = self.apic.filter.list_all()
+        self.apic_tenants = self.apic.fvTenant.list_all()
+        self.apic_bridge_domains = self.apic.fvBD.list_all()
+        self.apic_subnets = self.apic.fvSubnet.list_all()
+        self.apic_app_profiles = self.apic.fvAp.list_all()
+        self.apic_epgs = self.apic.fvAEPg.list_all()
+        self.apic_filters = self.apic.vzFilter.list_all()
 
     def ensure_tenant_created_on_apic(self, tenant_id):
         """Make sure a tenant exists on the APIC.
@@ -80,30 +80,30 @@ class APICManager(object):
         if not found
         """
         if not tenant_id in self.apic_tenants:
-            self.apic.tenant.create(tenant_id)
+            self.apic.fvTenant.create(tenant_id)
             self.apic_tenants.append(tenant_id)
 
     def ensure_bd_created_on_apic(self, tenant_id, bd_id):
         if not bd_id in self.apic_bridge_domains:
-            self.apic.bridge_domain.create(tenant_id, bd_id)
+            self.apic.fvBD.create(tenant_id, bd_id)
             self.apic_bridge_domains.append(bd_id)
 
     def delete_bd_on_apic(self, tenant_id, bd_id):
-        self.apic.bridge_domain.delete(tenant_id, bd_id)
+        self.apic.fvBD.delete(tenant_id, bd_id)
 
     def ensure_subnet_created_on_apic(self, tenant_id, bd_id, subnet_id, gw_ip):
         if not subnet_id in self.apic_subnets:
-            self.apic.subnet.create(tenant_id, bd_id, gw_ip)
+            self.apic.fvSubnet.create(tenant_id, bd_id, gw_ip)
             self.apic_subnets.append(subnet_id)
 
     def ensure_filter_created_on_apic(self, tenant_id, filter_id):
         if not filter_id in self.apic_filters:
-            self.apic.filter.create(tenant_id, filter_id)
+            self.apic.vzFilter.create(tenant_id, filter_id)
             self.apic_filters.append(filter_id)
 
     def get_epg_list_from_apic(self):
         """Get a list of all EPG's from the APIC."""
-        self.apic_epgs = self.apic.epg.list_all()
+        self.apic_epgs = self.apic.fvAEPg.list_all()
 
     def search_for_epg_with_net_and_secgroups(self, network_id,
                                               security_groups):
@@ -127,7 +127,7 @@ class APICManager(object):
 
         # Create a new EPG on the APIC
         epg_uid = uuid.uuid4()
-        self.apic.epg.create(epg_uid)
+        self.apic.fvAEPg.create(epg_uid)
     
         epg = NetworkEPG(network_id=network_id,
                          epg_id=epg_uid)
