@@ -41,6 +41,9 @@ TEST_SUBJECT = 'ForSale'
 TEST_FILTER = 'Carbon'
 TEST_ENTRY = 'FrontDoor'
 
+TEST_VMMP = 'VMware'  # Change to 'OpenStack' when APIC supports it
+TEST_DOMAIN = 'MyCloud'
+
 
 class TestCiscoApicClient(base.BaseTestCase):
 
@@ -254,3 +257,18 @@ class TestCiscoApicClient(base.BaseTestCase):
         self.apic.fvTenant.delete(TEST_TENANT)
         self.assertRaises(cexc.ApicManagedObjectNotFound,
                           self.apic.fvTenant.get, TEST_TENANT)
+
+    def test_create_and_lookup_vmmdom(self):
+        dom_cloud = self.apic.vmmDomP.create(TEST_VMMP, TEST_DOMAIN)
+        self.assertIsNotNone(dom_cloud)
+        # Get the DN of dom_cloud
+        vmm_dn = self.apic.vmmDomP.attr(dom_cloud, 'dn')
+        self.assertEqual(vmm_dn,
+                         'uni/vmmp-%s/dom-%s' % (TEST_VMMP, TEST_DOMAIN))
+        new_dom = self.apic.fvRsVmmDomAtt.create(TEST_TENANT, TEST_AP, TEST_EPG,
+                                                 vmm_dn)
+        self.assertIsNotNone(new_dom)
+        self.apic.fvRsVmmDomAtt.delete(TEST_TENANT, TEST_AP, TEST_EPG, vmm_dn)
+        self.assertRaises(cexc.ApicManagedObjectNotFound,
+                          self.apic.fvRsVmmDomAtt.get, TEST_TENANT, TEST_AP,
+                          TEST_EPG, vmm_dn)

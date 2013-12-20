@@ -23,27 +23,31 @@ from webob import exc as wexc
 from neutron.plugins.ml2.drivers.cisco import exceptions as cexc
 
 # Info about a MO's RN format and container class
-MoPath = namedtuple('MoPath', ['rn_fmt', 'container'])
+MoPath = namedtuple('MoPath', ['container', 'rn_fmt'])
 
 supported_mos = {
-    'fvTenant': MoPath('tn-%s', None),
-    'fvBD': MoPath('BD-%s', 'fvTenant'),
-    'fvRsBd': MoPath('rsbd', 'fvAEPg'),
-    'fvSubnet': MoPath('subnet-[%s]', 'fvBD'),
-    'fvCtx': MoPath('ctx-%s', 'fvTenant'),
-    'fvRsCtx': MoPath('rsctx', 'fvBD'),
-    'fvAp': MoPath('ap-%s', 'fvTenant'),
-    'fvAEPg': MoPath('epg-%s', 'fvAp'),
-    'fvRsProv': MoPath('rsprov-%s', 'fvAEPg'),
-    'fvRsCons': MoPath('rscons-%s', 'fvAEPg'),
-    'fvRsDomAtt': MoPath('rsdomatt-%s', 'fvAEPg'),
-    'vzBrCP': MoPath('brc-%s', 'fvTenant'),
-    'vzSubj': MoPath('subj-%s', 'vzBrCP'),
-    'vzFilter': MoPath('flt-%s', 'fvTenant'),
-    'vzRsFiltAtt': MoPath('rsfiltAtt-%s', 'vzSubj'),
-    'vzEntry': MoPath('e-%s', 'vzFilter'),
-    'vzInTerm': MoPath('intmnl', 'vzSubj'),
-    'vzOutTerm': MoPath('outtmnl', 'vzSubj'),
+    'fvTenant': MoPath(None, 'tn-%s'),
+    'fvBD': MoPath('fvTenant', 'BD-%s'),
+    'fvRsBd': MoPath('fvAEPg', 'rsbd'),
+    'fvSubnet': MoPath('fvBD', 'subnet-[%s]'),
+    'fvCtx': MoPath('fvTenant', 'ctx-%s'),
+    'fvRsCtx': MoPath('fvBD', 'rsctx'),
+    'fvAp': MoPath('fvTenant', 'ap-%s'),
+    'fvAEPg': MoPath('fvAp', 'epg-%s'),
+    'fvRsProv': MoPath('fvAEPg', 'rsprov-%s'),
+    'fvRsCons': MoPath('fvAEPg', 'rscons-%s'),
+
+    'vzBrCP': MoPath('fvTenant', 'brc-%s'),
+    'vzSubj': MoPath('vzBrCP', 'subj-%s'),
+    'vzFilter': MoPath('fvTenant', 'flt-%s'),
+    'vzRsFiltAtt': MoPath('vzSubj', 'rsfiltAtt-%s'),
+    'vzEntry': MoPath('vzFilter', 'e-%s'),
+    'vzInTerm': MoPath('vzSubj', 'intmnl'),
+    'vzOutTerm': MoPath('vzSubj', 'outtmnl'),
+
+    'vmmProvP': MoPath(None, 'vmmp-%s'),
+    'vmmDomP': MoPath('vmmProvP', 'dom-%s'),
+    'fvRsVmmDomAtt': MoPath('fvAEPg', 'rsvmmDomAtt-[%s]'),
 }
 
 
@@ -114,7 +118,7 @@ def requestdata(request_func):
         imdata = unicode2str(response.json()).get('imdata')
         if response.status_code != wexc.HTTPOk.code:
             err_text = imdata[0]['error']['attributes']['text']
-            raise cexc.ApicResponseNotOk(request=args[0],
+            raise cexc.ApicResponseNotOk(request=self.dn(*args),
                                         status_code=response.status_code,
                                         reason=response.reason, text=err_text)
         return imdata
