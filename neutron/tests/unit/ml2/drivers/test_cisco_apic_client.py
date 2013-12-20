@@ -201,6 +201,35 @@ class TestCiscoApicClient(base.BaseTestCase):
         self.assertRaises(cexc.ApicManagedObjectNotFound,
                           self.apic.fvTenant.get, TEST_TENANT)
 
+    def test_create_epg_with_bd(self):
+        self.delete_test_objects()
+
+        bd_args = TEST_TENANT, TEST_NETWORK
+        epg_args = TEST_TENANT, TEST_AP, TEST_EPG
+
+        bd = self.apic.fvBD.create(*bd_args)
+        self.assertIsNotNone(bd)
+
+        bd_name = self.apic.fvBD.attr(bd, 'name')
+        # create fvRsBd
+        rs_bd = self.apic.fvRsBd.create(*epg_args, tnFvBDName=bd_name)
+        self.assertIsNotNone(rs_bd)
+        epg = self.apic.fvAEPg.get(*epg_args)
+        self.assertIsNotNone(epg)
+
+        # delete epg
+        self.apic.fvAEPg.delete(*epg_args)
+        # tenant and BD should still exist
+        tenant = self.apic.fvTenant.get(TEST_TENANT)
+        self.assertIsNotNone(tenant)
+        bd = self.apic.fvBD.get(*bd_args)
+        self.assertIsNotNone(bd)
+        self.assertRaises(cexc.ApicManagedObjectNotFound,
+                          self.apic.fvAEPg.get, *epg_args)
+        self.apic.fvTenant.delete(TEST_TENANT)
+        self.assertRaises(cexc.ApicManagedObjectNotFound,
+                          self.apic.fvTenant.get, TEST_TENANT)
+
     def test_list_tenants(self):
         tlist = self.apic.fvTenant.list_all()
         self.assertIsNotNone(tlist)

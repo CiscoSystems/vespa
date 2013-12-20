@@ -214,6 +214,10 @@ class MoClient(ApicSession, MoClass):
         except cexc.ApicManagedObjectNotFound:
             mo = self._post_mo(*params, **attrs)
             self._ensure_status(mo, 'created')
+        else:
+            # MO found. Does the caller want to update some attrs?
+            if attrs:
+                mo = self._post_mo(*params, **attrs)
         return mo
 
     def get(self, *params):
