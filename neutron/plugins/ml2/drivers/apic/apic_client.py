@@ -53,22 +53,40 @@ supported_mos = {
 
 class MoClass(object):
 
+    # Note(Henry): Yes, I am using a mutable default argument _inst_cache
+    # here. It is not a design flaw, it is exactly what I want: for it to
+    # persist for the life of MoClass to cache instances.
+    # noinspection PyDefaultArgument
+    def __new__(cls, mo_class, _inst_cache={}):
+        """Ensure we create only one instance per mo_class."""
+        try:
+            return _inst_cache[mo_class]
+        except KeyError:
+            new_inst = super(MoClass, cls).__new__(cls)
+            new_inst.__init__(mo_class)
+            _inst_cache[mo_class] = new_inst
+            return new_inst
+
     def __init__(self, mo_class):
         global supported_mos
-        self.mo_class = mo_class
+        self.klass = mo_class
         self.container = supported_mos[mo_class].container
         self.rn_fmt = supported_mos[mo_class].rn_fmt
-        self.dn_fmt = self._dn_fmt()
+        self.dn_fmt, self.params = self._dn_fmt()
 
     def _dn_fmt(self):
-        """
-        Recursively build the DN format using container and RN.
+        """Recursively build the DN format using container and RN.
 
+        Also make a list of the required parameters.
         Note: Call this method only once at init.
         """
+        param = [self.klass] if '%s' in self.rn_fmt else []
         if self.container:
-            return '/'.join([MoClass(self.container).dn_fmt, self.rn_fmt])
-        return 'uni/' + self.rn_fmt
+            container = MoClass(self.container)
+            dn_fmt = '/'.join([container.dn_fmt, self.rn_fmt])
+            params = container.params + param
+            return dn_fmt, params
+        return 'uni/' + self.rn_fmt, param
 
     def dn(self, *params):
         """Return the distinguished name for a managed object."""
@@ -78,9 +96,6 @@ class MoClass(object):
     def ux_name(*params):
         """Name for user-readable display in errors, logs, etc."""
         return ', '.join(params)  # TODO(Henry): something nicer?
-
-    def attr(self, mo, key):
-        return mo[0][self.mo_class]['attributes'][key]
 
 
 def unicode2str(data):
@@ -110,7 +125,7 @@ def requestdata(request_func):
         Extract the data from the response and return it.
     """
     def wrapper(self, *args, **kwargs):
-        if not self.client.username and self.client.authentication:
+        if self.client.username and not self.client.authentication:
             raise cexc.ApicSessionNotLoggedIn
         response = request_func(self, *args, **kwargs)
         if response is None:
@@ -137,22 +152,18 @@ class ApicSession(object):
         """Build the body for a msg out of a key and some attributes."""
         return json.dumps({key: {'attributes': attrs}})
 
-    def _mo_names(self, mo_list):
-        """Extract a list of just the names of the managed objects."""
-        return [mo[self.mo_class]['attributes']['name'] for mo in mo_list]
-
     def _api_url(self, api):
         """Create the URL for a simple API."""
         return '%s/%s.json' % (self.api_base, api)
 
-    def _mo_url(self, *args):
+    def _mo_url(self, mo, *args):
         """Create a URL for a MO lookup by DN."""
-        dn = self.dn(*args)
+        dn = mo.dn(*args)
         return '%s/mo/%s.json' % (self.api_base, dn)
 
-    def _qry_url(self):
+    def _qry_url(self, mo):
         """Create a URL for a query lookup by MO class."""
-        return '%s/class/%s.json' % (self.api_base, self.mo_class)
+        return '%s/class/%s.json' % (self.api_base, mo.klass)
 
     # REST requests
 
@@ -163,15 +174,15 @@ class ApicSession(object):
         return self.session.get(url)
 
     @requestdata
-    def _get_mo(self, *args):
+    def _get_mo(self, mo, *args):
         """Retrieve a MO by DN."""
-        url = self._mo_url(*args) + '?query-target=self'
+        url = self._mo_url(mo, *args) + '?query-target=self'
         return self.session.get(url)
 
     @requestdata
-    def _list_mo(self):
+    def _list_mo(self, mo):
         """Retrieve the list of MOs for a class."""
-        url = self._qry_url()
+        url = self._qry_url(mo)
         return self.session.get(url)
 
     @requestdata
@@ -181,68 +192,77 @@ class ApicSession(object):
         return self.session.post(url, data=data)
 
     @requestdata
-    def _post_mo(self, *args, **data):
+    def _post_mo(self, mo, *args, **data):
         """Post data for MO to the server."""
-        url = self._mo_url(*args)
-        data = self._make_data(self.mo_class, **data)
+        url = self._mo_url(mo, *args)
+        data = self._make_data(mo.klass, **data)
         return self.session.post(url, data=data)
 
 
-class MoClient(ApicSession, MoClass):
+class MoManager(ApicSession):
+    """CRUD operations on APIC Managed Objects."""
 
     def __init__(self, client, mo_class):
-        ApicSession.__init__(self, client)
-        MoClass.__init__(self, mo_class)
+        super(MoManager, self).__init__(client)
+        self.client = client
+        self.mo = MoClass(mo_class)
 
-    def _ensure_status(self, mo, status):
+    def _mo_names(self, mo_list):
+        """Extract a list of just the names of the managed objects."""
+        return [mo[self.mo.klass]['attributes']['name'] for mo in mo_list]
+
+    def attr(self, obj, key):
+        return obj[0][self.mo.klass]['attributes'][key]
+
+    def _ensure_status(self, obj, status):
         """Ensure that the status of a Managed Object is as expected."""
-        if self.attr(mo, 'status') != status:
-            name = self.attr(mo, 'name')
+        if self.attr(obj, 'status') != status:
+            name = self.attr(obj, 'name')
             raise cexc.ApicMoStatusChangeFailed(
-                mo_class=self.mo_class, name=name, status=status)
+                mo_class=self.mo.klass, name=name, status=status)
 
     def _create_prereqs(self, *params):
-        if self.container:
-            prereq = MoClient(self.client, self.container)
-            prereq.create(*(params[0: prereq.dn_fmt.count('%s')]))
+        if self.mo.container:
+            prereq = MoManager(self.client, self.mo.container)
+            prereq.create(*(params[0: prereq.mo.dn_fmt.count('%s')]))
 
     def create(self, *params, **attrs):
         self._create_prereqs(*params)
         try:
             # Use existing object if it's already created
-            mo = self.get(*params)
+            obj = self.get(*params)
         except cexc.ApicManagedObjectNotFound:
-            mo = self._post_mo(*params, **attrs)
-            self._ensure_status(mo, 'created')
+            obj = self._post_mo(self.mo, *params, **attrs)
+            self._ensure_status(obj, 'created')
         else:
             # MO found. Does the caller want to update some attrs?
             if attrs:
-                mo = self._post_mo(*params, **attrs)
-        return mo
+                obj = self._post_mo(self.mo, *params, **attrs)
+        return obj
 
     def get(self, *params):
-        mo = self._get_mo(*params)
-        if not mo:
+        obj = self._get_mo(self.mo, *params)
+        if not obj:
             raise cexc.ApicManagedObjectNotFound(
-                klass=self.mo_class, name=self.ux_name(*params))
-        return mo
+                klass=self.mo.klass, name=self.mo.ux_name(*params))
+        return obj
 
     def list_all(self):
-        mo_list = self._list_mo()
+        mo_list = self._list_mo(self.mo)
         return self._mo_names(mo_list)
 
     def update(self, *params, **attrs):
         self.get(*params)  # Raises if not found
-        return self._post_mo(*params, **attrs)
+        return self._post_mo(self.mo, *params, **attrs)
 
     def delete(self, *params):
         try:
             self.get(*params)
         except cexc.ApicManagedObjectNotFound:
             return True
-        mo = self._post_mo(*params, status='deleted')
-        self._ensure_status(mo, 'deleted')
-        return mo
+        obj = self._post_mo(self.mo, *params, status='deleted')
+        self._ensure_status(obj, 'deleted')
+        return obj
 
 
 class RestClient(ApicSession):
@@ -272,7 +292,7 @@ class RestClient(ApicSession):
 
         # Supported objects
         for mo_class in supported_mos:
-            self.__dict__[mo_class] = MoClient(self, mo_class)
+            self.__dict__[mo_class] = MoManager(self, mo_class)
 
     def login(self, usr, pwd):
         """Log in to server. Save user name and authentication."""

@@ -72,7 +72,7 @@ class TestCiscoApicClient(base.BaseTestCase):
         except cexc.ApicManagedObjectNotFound:
             pass
         try:
-            self.apic.fvCtx.create(TEST_TENANT, TEST_L3CTX)
+            self.apic.fvCtx.delete(TEST_TENANT, TEST_L3CTX)
         except cexc.ApicManagedObjectNotFound:
             pass
         try:
