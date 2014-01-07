@@ -36,6 +36,7 @@ supported_mos = {
     'fvAEPg': MoPath('fvAp', 'epg-%s'),
     'fvRsProv': MoPath('fvAEPg', 'rsprov-%s'),
     'fvRsCons': MoPath('fvAEPg', 'rscons-%s'),
+    'fvRsVmmDomAtt': MoPath('fvAEPg', 'rsvmmDomAtt-[%s]'),
 
     'vzBrCP': MoPath('fvTenant', 'brc-%s'),
     'vzSubj': MoPath('vzBrCP', 'subj-%s'),
@@ -47,7 +48,26 @@ supported_mos = {
 
     'vmmProvP': MoPath(None, 'vmmp-%s'),
     'vmmDomP': MoPath('vmmProvP', 'dom-%s'),
-    'fvRsVmmDomAtt': MoPath('fvAEPg', 'rsvmmDomAtt-[%s]'),
+
+    'infra': MoPath(None, 'infra'),
+    'infraNodeP': MoPath('infra', 'nprof-%s'),
+    'infraLeafS': MoPath('infraNodeP', 'leaves-%s-typ-%s'),
+    'infraNodeBlk': MoPath('infraLeafS', 'nodeblk-%s'),
+    'infraRsAccPortP': MoPath('infraNodeP', 'rsaccPortP-[%s]'),
+    'infraAccPortP': MoPath('infra', 'accportprof-%s'),
+    'infraHPortS': MoPath('infraAccPortP', 'hports-%s-typ-%s'),
+    'infraPortBlk': MoPath('infraHPortS', 'portblk-%s'),
+    'infraRsAccBaseGrp': MoPath('infraHPortS', 'rsaccBaseGrp'),
+    'infraFuncP': MoPath('infra', 'funcprof'),
+    'infraAccPortGrp': MoPath('infraFuncP', 'accportgrp-%s'),
+    'infraRsAttEntP': MoPath('infraAccPortGrp', 'rsattEntP'),
+    'infraAttEntityP': MoPath('infra', 'attentp-%s'),
+    'infraRsDomP': MoPath('infraAttEntityP', 'rsdomP-[%s]'),
+
+    'fvnsVlanInstP': MoPath('infra', 'vlanns-%s-%s'),
+    'fvnsEncapBlk_vlan': MoPath('fvnsVlanInstP', 'from-%s-to-%s'),
+    'fvnsVxlanInstP': MoPath('infra', 'vxlanns-%s'),
+    'fvnsEncapBlk_vxlan': MoPath('fvnsVxlanInstP', 'from-%s-to-%s'),
 }
 
 
@@ -127,15 +147,25 @@ def requestdata(request_func):
     def wrapper(self, *args, **kwargs):
         if self.client.username and not self.client.authentication:
             raise cexc.ApicSessionNotLoggedIn
-        response = request_func(self, *args, **kwargs)
+        url, data, response = request_func(self, *args, **kwargs)
         if response is None:
-            raise cexc.ApicHostNoResponse(url=args[0])
+            raise cexc.ApicHostNoResponse(url=url)
+        if data is None:
+            request = url
+        else:
+            request = '%s, data=%s' % (url, data)
         imdata = unicode2str(response.json()).get('imdata')
         if response.status_code != wexc.HTTPOk.code:
-            err_text = imdata[0]['error']['attributes']['text']
-            raise cexc.ApicResponseNotOk(request=self.dn(*args),
-                                        status_code=response.status_code,
-                                        reason=response.reason, text=err_text)
+            try:
+                err_text = imdata[0]['error']['attributes']['text']
+            except (IndexError, KeyError):
+                err_text = '[text for APIC error not found]'
+            raise cexc.ApicResponseNotOk(request=request,
+                                         status_code=response.status_code,
+                                         reason=response.reason,
+                                         text=err_text)
+        if not imdata:
+            raise cexc.ApicManagedObjectNoData(request=request)
         return imdata
     return wrapper
 
@@ -171,32 +201,32 @@ class ApicSession(object):
     def get_data(self, request):
         """Retrieve generic data from the server."""
         url = self._api_url(request)
-        return self.session.get(url)
+        return url, None, self.session.get(url)
 
     @requestdata
     def _get_mo(self, mo, *args):
         """Retrieve a MO by DN."""
         url = self._mo_url(mo, *args) + '?query-target=self'
-        return self.session.get(url)
+        return url, None, self.session.get(url)
 
     @requestdata
     def _list_mo(self, mo):
         """Retrieve the list of MOs for a class."""
         url = self._qry_url(mo)
-        return self.session.get(url)
+        return url, None, self.session.get(url)
 
     @requestdata
     def post_data(self, request, data):
         """Post generic data to the server."""
         url = self._api_url(request)
-        return self.session.post(url, data=data)
+        return url, data, self.session.post(url, data=data)
 
     @requestdata
     def _post_mo(self, mo, *args, **data):
         """Post data for MO to the server."""
         url = self._mo_url(mo, *args)
         data = self._make_data(mo.klass, **data)
-        return self.session.post(url, data=data)
+        return url, data, self.session.post(url, data=data)
 
 
 class MoManager(ApicSession):
@@ -231,21 +261,24 @@ class MoManager(ApicSession):
         try:
             # Use existing object if it's already created
             obj = self.get(*params)
-        except cexc.ApicManagedObjectNotFound:
+        except cexc.ApicManagedObjectNoData:
             obj = self._post_mo(self.mo, *params, **attrs)
             self._ensure_status(obj, 'created')
         else:
             # MO found. Does the caller want to update some attrs?
             if attrs:
-                obj = self._post_mo(self.mo, *params, **attrs)
+                # OK, but only update attrs that differ
+                updated_attrs = {}
+                for attr, new_val in attrs.items():
+                    old_val = self.attr(obj, attr)
+                    if new_val != old_val:
+                        updated_attrs[attr] = new_val
+                if updated_attrs:
+                    obj = self._post_mo(self.mo, *params, **updated_attrs)
         return obj
 
     def get(self, *params):
-        obj = self._get_mo(self.mo, *params)
-        if not obj:
-            raise cexc.ApicManagedObjectNotFound(
-                klass=self.mo.klass, name=self.mo.ux_name(*params))
-        return obj
+        return self._get_mo(self.mo, *params)
 
     def list_all(self):
         mo_list = self._list_mo(self.mo)
@@ -258,7 +291,7 @@ class MoManager(ApicSession):
     def delete(self, *params):
         try:
             self.get(*params)
-        except cexc.ApicManagedObjectNotFound:
+        except cexc.ApicManagedObjectNoData:
             return True
         obj = self._post_mo(self.mo, *params, status='deleted')
         self._ensure_status(obj, 'deleted')
@@ -275,7 +308,8 @@ class RestClient(ApicSession):
         authentication  Login info. None if not logged in to controller.
     """
 
-    def __init__(self, host, port, usr=None, pwd=None, api='api', ssl=False):
+    def __init__(self, host, port=80, usr=None, pwd=None, api='api',
+                 ssl=False):
         """Establish a session with the APIC."""
         protocol = ssl and 'https' or 'http'
         self.api_base = '%s://%s:%s/%s' % (protocol, host, port, api)
@@ -307,9 +341,13 @@ class RestClient(ApicSession):
 
     def logout(self):
         """End session with server."""
-        if self.authentication and self.username:
-            data = self._make_data('aaaUser', name=self.username)
-            bye = self.post_data('aaaLogout', data=data)
+        if not self.username:
             self.authentication = None
-            self.username = None
-            return bye
+        if self.authentication:
+            data = self._make_data('aaaUser', name=self.username)
+            try:
+                self.post_data('aaaLogout', data=data)
+            except cexc.ApicManagedObjectNoData:
+                # expected for aaaLogout
+                pass
+            self.authentication = None

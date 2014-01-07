@@ -85,7 +85,7 @@ class ApicHostNoResponse(exceptions.NotFound):
 
 class ApicResponseNotOk(exceptions.NeutronException):
     """A response from the APIC was not HTTP OK."""
-    message = _("APIC responded to %(request)s request with code "
+    message = _("APIC responded to '%(request)s' request with code "
                 "%(status_code)s: %(reason)s, %(text)s")
 
 
@@ -101,9 +101,10 @@ class ApicSessionNotLoggedIn(exceptions.NotAuthorized):
 
 class ApicMoStatusChangeFailed(exceptions.StateInvalid):
     """Failed to create or delete a managed object."""
-    message = _("Managed Object %(mo_class)s '%(name)s' not %(status)")
+    message = _("Managed Object %(mo_class)s '%(name)s' not %(status)s")
 
 
-class ApicManagedObjectNotFound(exceptions.NotFound):
-    """Managed Object not found on APIC."""
-    message = _("%(klass)s object '%(name)s' not found")
+class ApicManagedObjectNoData(exceptions.NotFound):
+    """No object data receved in response to APIC request."""
+    message = _("No object data received in response to request "
+                "'%(request)s''")
