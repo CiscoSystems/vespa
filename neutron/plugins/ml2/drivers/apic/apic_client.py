@@ -36,7 +36,7 @@ supported_mos = {
     'fvAEPg': MoPath('fvAp', 'epg-%s'),
     'fvRsProv': MoPath('fvAEPg', 'rsprov-%s'),
     'fvRsCons': MoPath('fvAEPg', 'rscons-%s'),
-    'fvRsVmmDomAtt': MoPath('fvAEPg', 'rsvmmDomAtt-[%s]'),
+    'fvRsDomAtt': MoPath('fvAEPg', 'rsdomAtt-[%s]'),
 
     'vzBrCP': MoPath('fvTenant', 'brc-%s'),
     'vzSubj': MoPath('vzBrCP', 'subj-%s'),
@@ -65,9 +65,9 @@ supported_mos = {
     'infraRsDomP': MoPath('infraAttEntityP', 'rsdomP-[%s]'),
 
     'fvnsVlanInstP': MoPath('infra', 'vlanns-%s-%s'),
-    'fvnsEncapBlk_vlan': MoPath('fvnsVlanInstP', 'from-%s-to-%s'),
+    'fvnsEncapBlk__vlan': MoPath('fvnsVlanInstP', 'from-%s-to-%s'),
     'fvnsVxlanInstP': MoPath('infra', 'vxlanns-%s'),
-    'fvnsEncapBlk_vxlan': MoPath('fvnsVxlanInstP', 'from-%s-to-%s'),
+    'fvnsEncapBlk__vxlan': MoPath('fvnsVxlanInstP', 'from-%s-to-%s'),
 }
 
 
@@ -111,11 +111,6 @@ class MoClass(object):
     def dn(self, *params):
         """Return the distinguished name for a managed object."""
         return self.dn_fmt % params
-
-    @staticmethod
-    def ux_name(*params):
-        """Name for user-readable display in errors, logs, etc."""
-        return ', '.join(params)  # TODO(Henry): something nicer?
 
 
 def unicode2str(data):
@@ -164,8 +159,6 @@ def requestdata(request_func):
                                          status_code=response.status_code,
                                          reason=response.reason,
                                          text=err_text)
-        if not imdata:
-            raise cexc.ApicManagedObjectNoData(request=request)
         return imdata
     return wrapper
 
@@ -180,7 +173,7 @@ class ApicSession(object):
     @staticmethod
     def _make_data(key, **attrs):
         """Build the body for a msg out of a key and some attributes."""
-        return json.dumps({key: {'attributes': attrs}})
+        return json.dumps({key.split('__')[0]: {'attributes': attrs}})
 
     def _api_url(self, api):
         """Create the URL for a simple API."""
@@ -244,9 +237,9 @@ class MoManager(ApicSession):
     def attr(self, obj, key):
         return obj[0][self.mo.klass]['attributes'][key]
 
-    def _ensure_status(self, obj, status):
+    def _debug_ensure_status(self, obj, status):
         """Ensure that the status of a Managed Object is as expected."""
-        if self.attr(obj, 'status') != status:
+        if obj and self.attr(obj, 'status') != status:
             name = self.attr(obj, 'name')
             raise cexc.ApicMoStatusChangeFailed(
                 mo_class=self.mo.klass, name=name, status=status)
@@ -258,24 +251,20 @@ class MoManager(ApicSession):
 
     def create(self, *params, **attrs):
         self._create_prereqs(*params)
-        try:
-            # Use existing object if it's already created
-            obj = self.get(*params)
-        except cexc.ApicManagedObjectNoData:
-            obj = self._post_mo(self.mo, *params, **attrs)
-            self._ensure_status(obj, 'created')
-        else:
-            # MO found. Does the caller want to update some attrs?
-            if attrs:
-                # OK, but only update attrs that differ
-                updated_attrs = {}
-                for attr, new_val in attrs.items():
-                    old_val = self.attr(obj, attr)
-                    if new_val != old_val:
-                        updated_attrs[attr] = new_val
-                if updated_attrs:
-                    obj = self._post_mo(self.mo, *params, **updated_attrs)
-        return obj
+        # Use existing object if it's already created
+        obj = self.get(*params)
+        if not obj:
+            attrs['status'] = 'created'
+            self._post_mo(self.mo, *params, **attrs)
+        elif attrs:
+            # Existing MO found, update any attrs that differ
+            updated_attrs = {}
+            for attr, new_val in attrs.items():
+                old_val = self.attr(obj, attr)
+                if new_val != old_val:
+                    updated_attrs[attr] = new_val
+            if updated_attrs:
+                self._post_mo(self.mo, *params, **updated_attrs)
 
     def get(self, *params):
         return self._get_mo(self.mo, *params)
@@ -285,17 +274,10 @@ class MoManager(ApicSession):
         return self._mo_names(mo_list)
 
     def update(self, *params, **attrs):
-        self.get(*params)  # Raises if not found
-        return self._post_mo(self.mo, *params, **attrs)
+        self._post_mo(self.mo, *params, **attrs)
 
     def delete(self, *params):
-        try:
-            self.get(*params)
-        except cexc.ApicManagedObjectNoData:
-            return True
-        obj = self._post_mo(self.mo, *params, status='deleted')
-        self._ensure_status(obj, 'deleted')
-        return obj
+        self._post_mo(self.mo, *params, status='deleted')
 
 
 class RestClient(ApicSession):
@@ -345,9 +327,5 @@ class RestClient(ApicSession):
             self.authentication = None
         if self.authentication:
             data = self._make_data('aaaUser', name=self.username)
-            try:
-                self.post_data('aaaLogout', data=data)
-            except cexc.ApicManagedObjectNoData:
-                # expected for aaaLogout
-                pass
+            self.post_data('aaaLogout', data=data)
             self.authentication = None

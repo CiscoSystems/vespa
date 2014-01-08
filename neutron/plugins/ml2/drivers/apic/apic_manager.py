@@ -123,7 +123,7 @@ class APICManager(object):
         # Add VMM to EPG
         dom_cloud = self.apic.vmmDomP.create('VMware', 'openstack')
         vmm_dn = self.apic.vmmDomP.attr(dom_cloud, 'dn')
-        domatt = self.apic.fvRsVmmDomAtt.create(tenant_id, AP_NAME, epg_uid, vmm_dn)
+        domatt = self.apic.fvRsDomAtt.create(tenant_id, AP_NAME, epg_uid, vmm_dn)
 
         # Get EPG to read the segmentation id
         epgm = self.apic.fvAEPg.get(tenant_id, AP_NAME, epg_uid)

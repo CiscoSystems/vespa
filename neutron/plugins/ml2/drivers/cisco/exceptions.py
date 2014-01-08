@@ -102,9 +102,3 @@ class ApicSessionNotLoggedIn(exceptions.NotAuthorized):
 class ApicMoStatusChangeFailed(exceptions.StateInvalid):
     """Failed to create or delete a managed object."""
     message = _("Managed Object %(mo_class)s '%(name)s' not %(status)s")
-
-
-class ApicManagedObjectNoData(exceptions.NotFound):
-    """No object data receved in response to APIC request."""
-    message = _("No object data received in response to request "
-                "'%(request)s''")
