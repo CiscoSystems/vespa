@@ -63,6 +63,7 @@ supported_mos = {
     'infraRsAttEntP': MoPath('infraAccPortGrp', 'rsattEntP'),
     'infraAttEntityP': MoPath('infra', 'attentp-%s'),
     'infraRsDomP': MoPath('infraAttEntityP', 'rsdomP-[%s]'),
+    'infraRsVlanNs': MoPath('vmmDomP', 'rsvlanNs'),
 
     'fvnsVlanInstP': MoPath('infra', 'vlanns-%s-%s'),
     'fvnsEncapBlk__vlan': MoPath('fvnsVlanInstP', 'from-%s-to-%s'),
@@ -90,6 +91,7 @@ class MoClass(object):
     def __init__(self, mo_class):
         global supported_mos
         self.klass = mo_class
+        self.klass_name = mo_class.split('__')[0]
         self.container = supported_mos[mo_class].container
         self.rn_fmt = supported_mos[mo_class].rn_fmt
         self.dn_fmt, self.params = self._dn_fmt()
@@ -173,7 +175,7 @@ class ApicSession(object):
     @staticmethod
     def _make_data(key, **attrs):
         """Build the body for a msg out of a key and some attributes."""
-        return json.dumps({key.split('__')[0]: {'attributes': attrs}})
+        return json.dumps({key: {'attributes': attrs}})
 
     def _api_url(self, api):
         """Create the URL for a simple API."""
@@ -218,7 +220,7 @@ class ApicSession(object):
     def _post_mo(self, mo, *args, **data):
         """Post data for MO to the server."""
         url = self._mo_url(mo, *args)
-        data = self._make_data(mo.klass, **data)
+        data = self._make_data(mo.klass_name, **data)
         return url, data, self.session.post(url, data=data)
 
 
@@ -232,17 +234,10 @@ class MoManager(ApicSession):
 
     def _mo_names(self, mo_list):
         """Extract a list of just the names of the managed objects."""
-        return [mo[self.mo.klass]['attributes']['name'] for mo in mo_list]
+        return [mo[self.mo.klass_name]['attributes']['name'] for mo in mo_list]
 
     def attr(self, obj, key):
-        return obj[0][self.mo.klass]['attributes'][key]
-
-    def _debug_ensure_status(self, obj, status):
-        """Ensure that the status of a Managed Object is as expected."""
-        if obj and self.attr(obj, 'status') != status:
-            name = self.attr(obj, 'name')
-            raise cexc.ApicMoStatusChangeFailed(
-                mo_class=self.mo.klass, name=name, status=status)
+        return obj[0][self.mo.klass_name]['attributes'][key]
 
     def _create_prereqs(self, *params):
         if self.mo.container:
@@ -314,10 +309,6 @@ class RestClient(ApicSession):
         """Log in to server. Save user name and authentication."""
         name_pwd = self._make_data('aaaUser', name=usr, pwd=pwd)
         self.authentication = self.post_data('aaaLogin', data=name_pwd)
-        login_data = self.authentication[0]
-        if login_data and 'error' in login_data:
-            self.authentication = None
-            raise cexc.ApicLoginFailed(user=usr)
         self.username = usr
         return self.authentication
 

@@ -20,6 +20,7 @@ from webob import exc as wexc
 
 from neutron.common import log
 from neutron.plugins.ml2.drivers.apic import apic_client as apic
+from neutron.plugins.ml2.drivers.cisco import exceptions as cexc
 from neutron.tests import base
 
 
@@ -92,15 +93,13 @@ class TestCiscoApicClientMockController(base.BaseTestCase):
         self.mocked_get.return_value = self.mock_get_response
         self.mock_get_response.status_code = wexc.HTTPOk.code
 
-        self.mocked_json_response = {'imdata': [{}]}
-        mock_data0 = self.mocked_json_response['imdata'][0]
-        for mo in apic.supported_mos:
-            mock_data0[mo] = {'attributes': {'name': None, 'status': None}}
+        # The mocked response (can be updated by test-cases)
+        self.mocked_json_response = {'imdata': []}
         self.mock_post_response.json.return_value = self.mocked_json_response
         self.mock_get_response.json.return_value = self.mocked_json_response
+        self.mocked_response = self.mocked_json_response['imdata']
 
-        self.apic = apic.RestClient(MOCK_HOST, TEST_PORT, TEST_USR, TEST_PWD)
-
+        self.apic = apic.RestClient(MOCK_HOST)
         self.addCleanup(mock.patch.stopall)
 
     def tearDown(self):
@@ -111,26 +110,30 @@ class TestCiscoApicClientMockController(base.BaseTestCase):
         self.assertIsNone(self.apic.authentication)
         super(TestCiscoApicClientMockController, self).tearDown()
 
-    def _mock_response(self, mo, name=None, status=None):
-        mock_data0 = self.mocked_json_response['imdata'][0]
-        if mo not in mock_data0:
-            mock_data0[mo] = {'attributes': {'name': name, 'status': status}}
-        else:
-            if name is not None:
-                mock_data0[mo]['attributes']['name'] = name
-            if status is not None:
-                mock_data0[mo]['attributes']['status'] = status
+    def _mock_response(self, mo, **attrs):
+        self.mocked_response.append({mo: {'attributes': attrs}})
 
-    def _mock_response_append(self, mo, name, status=None):
-        self.mocked_json_response['imdata'].append(
-            {mo: {'attributes': {'name': name, 'status': status}}})
+    def _mock_error_response(self, code, text=''):
+        self.mock_get_response.status_code = code
+        self.mock_post_response.status_code = code
+        self._mock_response('error', text=text)
 
-    def test_client_session_start(self):
+    def test_client_session_login_ok(self):
+        self._mock_response('aaaLogin', userName=TEST_USR)
+        self.apic = apic.RestClient(MOCK_HOST, TEST_PORT, TEST_USR, TEST_PWD)
+        self.assertEqual(
+            self.apic.authentication[0]['aaaLogin']['attributes']['userName'],
+            TEST_USR)
         self.assertTrue(self.apic.api_base.startswith('http://'))
         self.assertEqual(self.apic.username, TEST_USR)
         self.assertIsNotNone(self.apic.authentication)
         self.apic = apic.RestClient(MOCK_HOST, TEST_PORT, ssl=True)
         self.assertTrue(self.apic.api_base.startswith('https://'))
+
+    def test_client_session_login_fail(self):
+        self._mock_error_response(wexc.HTTPUnauthorized)
+        self.assertRaises(cexc.ApicResponseNotOk,
+                          self.apic.login, TEST_USR, TEST_PWD)
 
     def test_client_session_logout_ok(self):
         self.apic.logout()
@@ -140,7 +143,7 @@ class TestCiscoApicClientMockController(base.BaseTestCase):
         self.assertIsNone(self.apic.authentication)
 
     def test_client_session_logout_fail(self):
-        self._mock_response('logout', status='fail')  # TODO
+        self._mock_response('aaaLogout', status='fail')  # TODO
         self.apic.logout()
         self.assertIsNone(self.apic.authentication)
 
@@ -163,7 +166,7 @@ class TestCiscoApicClientMockController(base.BaseTestCase):
 
     def test_list_tenants(self):
         self._mock_response('fvTenant', name='t1')
-        self._mock_response_append('fvTenant', name='t2')
+        self._mock_response('fvTenant', name='t2')
         tlist = self.apic.fvTenant.list_all()
         self.assertIsNotNone(tlist)
         self.assertEqual(len(tlist), 2)
@@ -378,6 +381,7 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
         # Create a VMM Domain for the cloud
         dom_args = TEST_VMMP, TEST_DOMAIN
         self.apic.vmmDomP.create(*dom_args)
+        self.apic.vmmDomP.create(*dom_args)
         domain = self.apic.vmmDomP.get(*dom_args)
         self.assertIsNotNone(domain)
 
@@ -389,10 +393,12 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
         epg_args = TEST_TENANT, TEST_AP, TEST_EPG
         dom_ref_args = epg_args + (dom_dn,)
         self.apic.fvRsDomAtt.create(*dom_ref_args)
+        self.apic.fvRsDomAtt.create(*dom_ref_args)
         dom_ref = self.apic.fvRsDomAtt.get(*dom_ref_args)
         self.assertIsNotNone(dom_ref)
 
         # Create a Node Profile
+        self.apic.infraNodeP.create(TEST_NODE_PROF)
         self.apic.infraNodeP.create(TEST_NODE_PROF)
         node_profile = self.apic.infraNodeP.get(TEST_NODE_PROF)
         self.assertIsNotNone(node_profile)
@@ -400,16 +406,19 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
         # Add a Leaf Node Selector to the Node Profile
         leaf_node_args = TEST_NODE_PROF, TEST_LEAF, TEST_LEAF_TYPE
         self.apic.infraLeafS.create(*leaf_node_args)
+        self.apic.infraLeafS.create(*leaf_node_args)
         leaf_node = self.apic.infraLeafS.get(*leaf_node_args)
         self.assertIsNotNone(leaf_node)
 
         # Add a Node Block to the Leaf Node Selector
         node_blk_args = leaf_node_args + (TEST_NODE_BLK,)
         self.apic.infraNodeBlk.create(*node_blk_args, from_='17', to_='17')
+        self.apic.infraNodeBlk.create(*node_blk_args, from_='17', to_='17')
         node_block = self.apic.infraNodeBlk.get(*node_blk_args)
         self.assertIsNotNone(node_block)
 
         # Create a Port Profile and get its DN
+        self.apic.infraAccPortP.create(TEST_PORT_PROF)
         self.apic.infraAccPortP.create(TEST_PORT_PROF)
         port_profile = self.apic.infraAccPortP.get(TEST_PORT_PROF)
         self.assertIsNotNone(port_profile)
@@ -418,17 +427,22 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
 
         # Associate the Port Profile with the Node Profile
         self.apic.infraRsAccPortP.create(TEST_NODE_PROF, pp_dn)
+        self.apic.infraRsAccPortP.create(TEST_NODE_PROF, pp_dn)
         ppref = self.apic.infraRsAccPortP.get(TEST_NODE_PROF, pp_dn)
         self.assertIsNotNone(ppref)
 
         # Add a Leaf Host Port Selector to the Port Profile
         lhps_args = TEST_PORT_PROF, TEST_PORT_SEL, TEST_PORT_TYPE
         self.apic.infraHPortS.create(*lhps_args)
+        self.apic.infraHPortS.create(*lhps_args)
         lhps = self.apic.infraHPortS.get(*lhps_args)
         self.assertIsNotNone(lhps)
 
         # Add a Port Block to the Leaf Host Port Selector
         port_block1_args = lhps_args + (TEST_PORT_BLK1,)
+        self.apic.infraPortBlk.create(
+            *port_block1_args,
+            fromCard='1', toCard='1', fromPort='10', toPort='12')
         self.apic.infraPortBlk.create(
             *port_block1_args,
             fromCard='1', toCard='1', fromPort='10', toPort='12')
@@ -440,10 +454,14 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
         self.apic.infraPortBlk.create(
             *port_block2_args,
             fromCard='1', toCard='1', fromPort='20', toPort='22')
+        self.apic.infraPortBlk.create(
+            *port_block2_args,
+            fromCard='1', toCard='1', fromPort='20', toPort='22')
         port_block2 = self.apic.infraPortBlk.get(*port_block2_args)
         self.assertIsNotNone(port_block2)
 
         # Create an Access Port Group and get its DN
+        self.apic.infraAccPortGrp.create(TEST_ACC_PORT_GRP)
         self.apic.infraAccPortGrp.create(TEST_ACC_PORT_GRP)
         access_pg = self.apic.infraAccPortGrp.get(TEST_ACC_PORT_GRP)
         self.assertIsNotNone(access_pg)
@@ -453,10 +471,12 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
 
         # Associate the Access Port Group with Leaf Host Port Selector
         self.apic.infraRsAccBaseGrp.create(*lhps_args, tDn=apg_dn)
+        self.apic.infraRsAccBaseGrp.create(*lhps_args, tDn=apg_dn)
         apg_ref = self.apic.infraRsAccBaseGrp.get(*lhps_args)
         self.assertIsNotNone(apg_ref)
 
         # Create an Attached Entity Profile
+        self.apic.infraAttEntityP.create(TEST_ATT_ENT_PROF)
         self.apic.infraAttEntityP.create(TEST_ATT_ENT_PROF)
         ae_profile = self.apic.infraAttEntityP.get(TEST_ATT_ENT_PROF)
         self.assertIsNotNone(ae_profile)
@@ -465,16 +485,19 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
 
         # Associate the cloud domain with the Attached Entity Profile
         self.apic.infraRsDomP.create(TEST_ATT_ENT_PROF, dom_dn)
+        self.apic.infraRsDomP.create(TEST_ATT_ENT_PROF, dom_dn)
         dom_ref = self.apic.infraRsDomP.get(TEST_ATT_ENT_PROF, dom_dn)
         self.assertIsNotNone(dom_ref)
 
         # Associate the aep with the apg
+        self.apic.infraRsAttEntP.create(TEST_ACC_PORT_GRP, tDn=aep_dn)
         self.apic.infraRsAttEntP.create(TEST_ACC_PORT_GRP, tDn=aep_dn)
         aep_ref = self.apic.infraRsAttEntP.get(TEST_ACC_PORT_GRP)
         self.assertIsNotNone(aep_ref)
 
         # Create a Vlan Instance Profile
         vinst_args = TEST_VLAN_NAME, TEST_VLAN_MODE
+        self.apic.fvnsVlanInstP.create(*vinst_args)
         self.apic.fvnsVlanInstP.create(*vinst_args)
         vlan_instp = self.apic.fvnsVlanInstP.get(*vinst_args)
         self.assertIsNotNone(vlan_instp)
@@ -483,8 +506,16 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
         eb_args = vinst_args + (TEST_VLAN_FROM, TEST_VLAN_TO)
         eb_data = {'name': 'encap', 'from': 'vlan-2', 'to': 'vlan-4000'}
         self.apic.fvnsEncapBlk__vlan.create(*eb_args, **eb_data)
+        self.apic.fvnsEncapBlk__vlan.create(*eb_args, **eb_data)
         encap_blk = self.apic.fvnsEncapBlk__vlan.get(*eb_args)
         self.assertIsNotNone(encap_blk)
+
+        # Associate a Vlan Name Space with a Domain
+        vlanns = self.apic.fvnsVlanInstP.attr(vlan_instp, 'dn')
+        self.apic.infraRsVlanNs.create(*dom_args, tDn=vlanns)
+        self.apic.infraRsVlanNs.create(*dom_args, tDn=vlanns)
+        vlanns_ref = self.apic.infraRsVlanNs.get(*dom_args)
+        self.assertIsNotNone(vlanns_ref)
 
         # ---------------------------
         # Delete all in reverse order

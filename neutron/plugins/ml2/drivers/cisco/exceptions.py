@@ -89,16 +89,6 @@ class ApicResponseNotOk(exceptions.NeutronException):
                 "%(status_code)s: %(reason)s, %(text)s")
 
 
-class ApicLoginFailed(exceptions.NotAuthorized):
-    """Failed to log in to APIC."""
-    message = _("Failed to log in to APIC as user %(user)s")
-
-
 class ApicSessionNotLoggedIn(exceptions.NotAuthorized):
     """Attempted APIC operation while not logged in to APIC."""
     message = _("Authorized APIC session not established")
-
-
-class ApicMoStatusChangeFailed(exceptions.StateInvalid):
-    """Failed to create or delete a managed object."""
-    message = _("Managed Object %(mo_class)s '%(name)s' not %(status)s")
