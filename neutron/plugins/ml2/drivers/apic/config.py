@@ -25,19 +25,29 @@ apic_opts = [
                help=_("Password for the APIC controller")),
     cfg.StrOpt('apic_port',
                help=_("Communication port for the APIC controller")),
+    cfg.StrOpt('apic_vmm_provider', default='VMware',
+               help=_("Name for the VMM domain provider")),
+    cfg.StrOpt('apic_vmm_domain', default='openstack',
+               help=_("Name for the VMM domain to be created for Openstack")),
+    cfg.StrOpt('apic_vlan_ns_name', default='openstack_ns',
+               help=_("Name for the vlan namespace to be used for openstack")),
+    cfg.StrOpt('apic_vlan_range', default='2:4093',
+               help=_("Range of VLAN's to be used for Openstack")),
+    cfg.StrOpt('apic_node_profile', default='openstack_profile',
+               help=_("Name of the node profile to be created")),
 ]
 
 
 cfg.CONF.register_opts(apic_opts, "ml2_apic")
 
-"""
-class ML2MechAPICConfig(object):
-    host_pools = {}
+
+class ML2MechApicConfig(object):
+    switch_dict = {}
 
     def __init__(self):
-        self._create_host_pool_dictionary()
+        self._create_switch_dictionary()
 
-    def _create_host_pool_dictionary(self):
+    def _create_switch_dictionary(self):
         multi_parser = cfg.MultiConfigParser()
         read_ok = multi_parser.read(cfg.CONF.config_file)
 
@@ -46,15 +56,11 @@ class ML2MechAPICConfig(object):
 
         for parsed_file in multi_parser.parsed:
             for parsed_item in parsed_file.keys():
-                pool, sep, pool_id = parsed_item.partition(':')
-                if pool.lower() == 'host_pool':
-                    self.host_pools[pool_id] = {}
-                    self.host_pools[pool_id]['hosts'] = \
-                    parsed_file[parsed_item]['hosts'][0].split(',')
-
-                    self.host_pools[pool_id]['switch_ip'] = \
-                    parsed_file[parsed_item]['switch'][0]
-
-                    self.host_pools[pool_id]['port_id'] = \
-                    parsed_file[parsed_item]['port'][0]
-"""
+                if parsed_item.startswith('switch'):
+                    switch, switch_id = parsed_item.split(':')
+                    if switch.lower() == 'switch':
+                        self.switch_dict[switch_id] = {}
+                        for host_list,port in parsed_file[parsed_item].items():
+                            hosts = host_list.split(',')
+                            port = port[0]
+                            self.switch_dict[switch_id][port] = hosts

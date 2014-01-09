@@ -14,6 +14,7 @@
 #    under the License.
 #
 # @author: Arvind Somya (asomya@cisco.com), Cisco Systems Inc.
+import itertools
 import sqlalchemy as sa
 import uuid
 
@@ -41,6 +42,8 @@ class NetworkEPG(model_base.BASEV2):
 
 class APICManager(object):
     def __init__(self):
+        config.ML2MechApicConfig()
+        self.switch_dict = config.ML2MechApicConfig.switch_dict
         # Connect to the the APIC
         host = cfg.CONF.ml2_apic.apic_host
         port = cfg.CONF.ml2_apic.apic_port
@@ -55,6 +58,129 @@ class APICManager(object):
         self.apic_app_profiles = self.apic.fvAp.list_all()
         self.apic_epgs = self.apic.fvAEPg.list_all()
         self.apic_filters = self.apic.vzFilter.list_all()
+        self.port_profiles = {}
+        self.vmm_domain = None
+        self.vlan_ns = None
+        self.node_profiles = {}
+        self.entity_profile = None
+        self.function_profile = None
+
+    def _to_range(self, i):
+        for a, b in itertools.groupby(enumerate(i), lambda (x, y): y - x):
+            b = list(b)
+            yield b[0][1], b[-1][1]
+
+    def ensure_infra_created_on_apic(self):
+        # Loop over switches
+        for switch in self.switch_dict.keys():
+            # Create a node profile for this switch
+            self.ensure_node_profile_created_for_switch(switch)
+            # Generate uuid for port profile name
+            ppname = uuid.uuid4()
+            # Create port profile for this switch
+            pprofile = self.ensure_port_profile_created_on_apic(ppname)
+            # Add port profile to node profile
+            ppdn = self.apic.infraAccPortP.attr(pprofile, 'dn')
+            self.apic.infraRsAccPortP.create(switch, ppdn)
+
+            # Gather port ranges for this switch
+            ports = self.switch_dict[switch].keys()
+            # Gather common modules
+            modules = {}
+            for port in ports:
+                module, sw_port = port.split('/')
+                if not module in modules:
+                    modules[module] = []
+                modules[module].append(int(sw_port))
+            # Sort modules and convert to ranges if possible
+            for module in modules:
+                # Create host port selector for this module
+                hname = uuid.uuid4()
+                hpselc = self.apic.infraHPortS.create(ppname, hname, 'range')
+                # Add relation to the function profile
+                fpdn = self.apic.infraAccPortGrp.attr(self.function_profile, 'dn')
+                self.apic.infraRsAccBaseGrp.create(ppname, hname, 'range', tDn=fpdn)
+                modules[module].sort()
+                ranges = self._to_range(modules[module])
+                # Add this module and ports to the profile
+                for prange in ranges:
+                    # Create port block for this port range
+                    pbname = uuid.uuid4()
+                    self.apic.infraPortBlk.create(ppname, hname, 'range',
+                                                  pbname, fromCard=module,
+                                                  toCard=module,
+                                                  fromPort=str(prange[0]),
+                                                  toPort=str(prange[-1]))
+           
+
+    def ensure_entity_profile_created_on_apic(self):
+        if not self.entity_profile:
+            vmm_dn = self.apic.vmmDomP.attr(self.vmm_domain, 'dn')
+            name = uuid.uuid4()
+            self.apic.infraAttEntityP.create(name)
+            # Attach vmm domain to entity profile
+            self.apic.infraRsDomP.create(name, vmm_dn)
+            self.entity_profile = self.apic.infraAttEntityP.get(name)
+
+    def ensure_function_profile_created_on_apic(self):
+        if not self.function_profile:
+            name = uuid.uuid4()
+            self.apic.infraAccPortGrp.create(name)
+            entp_dn = self.apic.infraAttEntityP.attr(self.entity_profile, 'dn')
+            self.apic.infraRsAttEntP.create(name, tDn=entp_dn)
+            self.function_profile = self.apic.infraAccPortGrp.get(name)
+            
+    def ensure_node_profile_created_for_switch(self, switch_id):
+        sobj = self.apic.infraNodeP.get(switch_id)
+        if not sobj:
+            # Create Node profile
+            self.apic.infraNodeP.create(switch_id)
+            # Create leaf selector
+            lswitch_id = uuid.uuid4()
+            self.apic.infraLeafS.create(switch_id, lswitch_id, 'range')
+            # Add leaf nodes to the selector
+            name = uuid.uuid4()
+            self.apic.infraNodeBlk.create(switch_id, lswitch_id, 'range',
+                                          name, from_=switch_id, to_=switch_id)
+            self.node_profiles[switch_id] = {}
+            self.node_profiles[switch_id]['object'] = self.apic.infraNodeP.get(switch_id)
+        else:
+            self.node_profiles[switch_id] = {}
+            self.node_profiles[switch_id]['object'] = sobj
+
+    def ensure_port_profile_created_on_apic(self, name):
+        self.apic.infraAccPortP.create(name)
+        return self.apic.infraAccPortP.get(name)
+
+    def ensure_vmm_domain_created_on_apic(self, vmm_name, vlan_ns=None, vxlan_ns=None):
+        if not self.vmm_domain:
+            provider = cfg.CONF.ml2_apic.apic_vmm_provider
+            self.apic.vmmDomP.create(provider, vmm_name)
+            if vlan_ns:
+                vlan_ns_dn = self.apic.fvnsVlanInstP.attr(vlan_ns, 'dn')
+                self.apic.infraRsVlanNs.create(provider, vmm_name, tDn=vlan_ns_dn)
+            elif vxlan_ns:
+                # TODO: (asomya) Add VXLAN bits bere
+                pass
+            self.vmm_domain = self.apic.vmmDomP.get(provider, vmm_name)
+
+    def ensure_vlan_ns_created_on_apic(self, name, vlan_min, vlan_max):
+        if not self.vlan_ns:
+            ns_args = name, 'dynamic'
+            self.apic.fvnsVlanInstP.create(*ns_args)
+            vlan_min = 'vlan-' + vlan_min
+            vlan_max = 'vlan-' + vlan_max
+            ns_blk_args = name, 'dynamic', vlan_min, vlan_max
+            self.vlan_encap = self.apic.fvnsEncapBlk__vlan.get(*ns_blk_args)
+            if not self.vlan_encap:
+                ns_kw_args = {'name': 'encap', 'from': vlan_min, 'to': vlan_max}
+                self.apic.fvnsEncapBlk__vlan.create(*ns_blk_args, **ns_kw_args)
+            return self.apic.fvnsVlanInstP.get(*ns_args)
+
+    def ensure_node_profile_created_on_apic(self, name):
+        if not self.node_profile:
+            self.apic.infraNodeP.create(name)
+            self.node_profile = self.apic.infraNodeP.get(name)
 
     def ensure_tenant_created_on_apic(self, tenant_id):
         """Make sure a tenant exists on the APIC.
@@ -117,11 +243,12 @@ class APICManager(object):
         bd_name = self.apic.fvBD.attr(bd, 'name')
 
         # create fvRsBd
-        self.apic.fvRsBd.create(tenant_id, AP_NAME, epg_uid)
-        #rs_bd = self.apic.fvRsBd.update(tenant_id, AP_NAME, epg_uid, tnFvBDName=bd_name)
+        self.apic.fvRsBd.create(tenant_id, AP_NAME, epg_uid, tnFvBDName=bd_name)
+        rs_bd = self.apic.fvRsBd.update(tenant_id, AP_NAME, epg_uid, tnFvBDName=bd_name)
 
         # Add VMM to EPG
         dom_cloud = self.apic.vmmDomP.create('VMware', 'openstack')
+        dom_cloud = self.apic.vmmDomP.get('VMware', 'openstack')
         vmm_dn = self.apic.vmmDomP.attr(dom_cloud, 'dn')
         domatt = self.apic.fvRsDomAtt.create(tenant_id, AP_NAME, epg_uid, vmm_dn)
 

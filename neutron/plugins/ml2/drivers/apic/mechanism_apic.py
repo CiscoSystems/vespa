@@ -32,8 +32,28 @@ LOG = log.getLogger(__name__)
 class APICMechanismDriver(api.MechanismDriver):
     def initialize(self):
         self.apic_manager = APICManager()
-        # TODO: Create a VMM domain and VLAN namespace
+
+        # Create a VMM domain and VLAN namespace
+        # Get vlan ns name
+        ns_name = cfg.CONF.ml2_apic.apic_vlan_ns_name
+        # Grab vlan ranges
+        (vlan_min, vlan_max) = cfg.CONF.ml2_apic.apic_vlan_range.split(':')
+        # Create VLAN namespace
+        vlan_ns = self.apic_manager.ensure_vlan_ns_created_on_apic(ns_name,
+                                                                   vlan_min,
+                                                                   vlan_max)
+        vmm_name = cfg.CONF.ml2_apic.apic_vmm_domain
+        # Create VMM domain
+        self.apic_manager.ensure_vmm_domain_created_on_apic(vmm_name, vlan_ns)
         
+        # Create entity profile
+        self.apic_manager.ensure_entity_profile_created_on_apic()
+        
+        # Create function profile
+        self.apic_manager.ensure_function_profile_created_on_apic()
+
+        # Create infrastructure on apic
+        self.apic_manager.ensure_infra_created_on_apic()
 
     def create_port_precommit(self, context):
         # Get tenant details from port context
