@@ -35,6 +35,10 @@ apic_opts = [
                help=_("Range of VLAN's to be used for Openstack")),
     cfg.StrOpt('apic_node_profile', default='openstack_profile',
                help=_("Name of the node profile to be created")),
+    cfg.StrOpt('apic_entity_profile', default='openstack_entity',
+               help=_("Name of the entity profile to be created")),
+    cfg.StrOpt('apic_function_profile', default='openstack_function',
+               help=_("Name of the function profile to be created")),
 ]
 
 

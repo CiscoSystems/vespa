@@ -113,19 +113,18 @@ class APICManager(object):
                                                   toPort=str(prange[-1]))
            
 
-    def ensure_entity_profile_created_on_apic(self):
+    def ensure_entity_profile_created_on_apic(self, name):
         if not self.entity_profile:
             vmm_dn = self.apic.vmmDomP.attr(self.vmm_domain, 'dn')
-            name = uuid.uuid4()
             self.apic.infraAttEntityP.create(name)
             # Attach vmm domain to entity profile
             self.apic.infraRsDomP.create(name, vmm_dn)
             self.entity_profile = self.apic.infraAttEntityP.get(name)
 
-    def ensure_function_profile_created_on_apic(self):
+    def ensure_function_profile_created_on_apic(self, name):
         if not self.function_profile:
-            name = uuid.uuid4()
             self.apic.infraAccPortGrp.create(name)
+            # Attach entity profile to function profile
             entp_dn = self.apic.infraAttEntityP.attr(self.entity_profile, 'dn')
             self.apic.infraRsAttEntP.create(name, tDn=entp_dn)
             self.function_profile = self.apic.infraAccPortGrp.get(name)

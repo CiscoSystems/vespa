@@ -47,10 +47,12 @@ class APICMechanismDriver(api.MechanismDriver):
         self.apic_manager.ensure_vmm_domain_created_on_apic(vmm_name, vlan_ns)
         
         # Create entity profile
-        self.apic_manager.ensure_entity_profile_created_on_apic()
+        ent_name = cfg.CONF.ml2_apic.apic_entity_profile
+        self.apic_manager.ensure_entity_profile_created_on_apic(ent_name)
         
         # Create function profile
-        self.apic_manager.ensure_function_profile_created_on_apic()
+        func_name = cfg.CONF.ml2_apic.apic_function_profile
+        self.apic_manager.ensure_function_profile_created_on_apic(func_name)
 
         # Create infrastructure on apic
         self.apic_manager.ensure_infra_created_on_apic()
