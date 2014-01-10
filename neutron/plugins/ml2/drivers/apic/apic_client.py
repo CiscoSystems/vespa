@@ -56,6 +56,9 @@ supported_mos = {
 
     'vmmProvP': MoPath(None, 'vmmp-%s', False),
     'vmmDomP': MoPath('vmmProvP', 'dom-%s'),
+    'vmmEpPD': MoPath('vmmDomP', 'eppd-[%s]'),
+
+    'physDomP': MoPath(None, 'phys-%s'),
 
     'infra': MoPath(None, 'infra'),
     'infraNodeP': MoPath('infra', 'nprof-%s'),

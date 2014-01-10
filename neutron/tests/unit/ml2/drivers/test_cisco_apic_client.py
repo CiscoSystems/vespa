@@ -28,11 +28,12 @@ LOG = log.logging.getLogger(__name__)
 ML2_PLUGIN = 'neutron.plugins.ml2.plugin.Ml2Plugin'
 PHYS_NET = 'physnet1'
 
-APIC_HOST = '172.21.32.71'   # was .116, .120, .71
+APIC0_HOST = '172.21.32.71'   # was .116, .120, .71
+APIC0_PORT = '7580'           # was 8000
 APIC1_HOST = '172.21.128.43'
 APIC2_HOST = '172.21.128.44'
 APIC3_HOST = '172.21.128.45'
-APIC_PORT = '7580'           # was 8000
+APIC4_HOST = '172.21.128.10'
 APIC_ADMIN = 'admin'
 APIC_PWD = 'ins3965!'
 
@@ -79,8 +80,10 @@ class TestCiscoApicClientMockController(base.BaseTestCase):
         super(TestCiscoApicClientMockController, self).setUp()
 
         # Mock the operations in requests
-        self.mocked_post = mock.patch('requests.Session.post').start()
-        self.mocked_get = mock.patch('requests.Session.get').start()
+        self.mocked_post = mock.patch('requests.Session.post',
+                                      autospec=True).start()
+        self.mocked_get = mock.patch('requests.Session.get',
+                                     autospec=True).start()
 
         # Mock responses from the server, for both post and get
         self.mock_post_response = mock.MagicMock()
@@ -261,7 +264,7 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
     """
     def setUp(self):
         super(TestCiscoApicClientLiveController, self).setUp()
-        self.apic = apic.RestClient(APIC2_HOST,
+        self.apic = apic.RestClient(APIC4_HOST,
                                     usr=APIC_ADMIN, pwd=APIC_PWD)
         self.addCleanup(self.sign_out)
 
@@ -590,6 +593,13 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
         self.apic.infraRsVlanNs.create(*dom_args, tDn=vlanns)
         vlanns_ref = self.apic.infraRsVlanNs.get(*dom_args)
         self.assertIsNotNone(vlanns_ref)
+
+        # Check if the vmm:EpPD is created
+        eppd_args = dom_args + (dom_dn,)
+        eppd = self.apic.vmmEpPD.get(*eppd_args)
+        self.assertIsNotNone(eppd)
+        eppd_dn = self.apic.vmmEpPD.attr(eppd, 'dn')
+        print eppd_dn
 
         # ---------------------------
         # Delete all in reverse order
