@@ -85,8 +85,18 @@ class ApicHostNoResponse(exceptions.NotFound):
 
 class ApicResponseNotOk(exceptions.NeutronException):
     """A response from the APIC was not HTTP OK."""
-    message = _("APIC responded to '%(request)s' request with code "
-                "%(status_code)s: %(reason)s, %(text)s")
+    message = _("APIC responded with HTTP status %(status)s: %(reason)s\n"
+                "Request: '%(request)s'\n"
+                "APIC error code %(err_code)s: %(err_text)s")
+
+    def __init__(self, **kwargs):
+        """Save the error information from the APIC."""
+        self.http_request = kwargs['request']
+        self.http_response_code = kwargs['status']
+        self.http_response_reason = kwargs['reason']
+        self.apic_err_code = kwargs['err_code']
+        self.apic_err_text = kwargs['err_text']
+        super(ApicResponseNotOk, self).__init__(**kwargs)
 
 
 class ApicSessionNotLoggedIn(exceptions.NotAuthorized):

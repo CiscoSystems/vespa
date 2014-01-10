@@ -76,9 +76,6 @@ TEST_VLAN_TO = 'vlan-4000'
 class TestCiscoApicClientMockController(base.BaseTestCase):
 
     def setUp(self):
-        """
-        docstring
-        """
         super(TestCiscoApicClientMockController, self).setUp()
 
         # Mock the operations in requests
@@ -102,24 +99,28 @@ class TestCiscoApicClientMockController(base.BaseTestCase):
         self.apic = apic.RestClient(MOCK_HOST)
         self.addCleanup(mock.patch.stopall)
 
-    def tearDown(self):
-        self.apic.logout()
-        self.assertIsNone(self.apic.authentication)
-        # Multiple signouts should not cause an error
-        self.apic.logout()
-        self.assertIsNone(self.apic.authentication)
-        super(TestCiscoApicClientMockController, self).tearDown()
-
-    def _mock_response(self, mo, **attrs):
+    def _mock_ok_response(self, mo, **attrs):
+        self.mock_get_response.status_code = wexc.HTTPOk.code
+        self.mock_post_response.status_code = wexc.HTTPOk.code
+        del self.mocked_response[:]
         self.mocked_response.append({mo: {'attributes': attrs}})
 
-    def _mock_error_response(self, code, text=''):
-        self.mock_get_response.status_code = code
-        self.mock_post_response.status_code = code
-        self._mock_response('error', text=text)
+    def _mock_response_append(self, mo, **attrs):
+        self.mocked_response.append({mo: {'attributes': attrs}})
+
+    def _mock_error_response(self, status, err_code='', err_text=u''):
+        self.mock_get_response.status_code = status
+        self.mock_post_response.status_code = status
+        del self.mocked_response[:]
+        self.mocked_response.append(
+            {'error': {'attributes': {'code': err_code, 'text': err_text}}})
+
+    def _mock_authenticate(self):
+        self.apic.login(TEST_USR, TEST_PWD)
+        self.apic.authentication = 'logged in'
 
     def test_client_session_login_ok(self):
-        self._mock_response('aaaLogin', userName=TEST_USR)
+        self._mock_ok_response('aaaLogin', userName=TEST_USR)
         self.apic = apic.RestClient(MOCK_HOST, TEST_PORT, TEST_USR, TEST_PWD)
         self.assertEqual(
             self.apic.authentication[0]['aaaLogin']['attributes']['userName'],
@@ -131,11 +132,14 @@ class TestCiscoApicClientMockController(base.BaseTestCase):
         self.assertTrue(self.apic.api_base.startswith('https://'))
 
     def test_client_session_login_fail(self):
-        self._mock_error_response(wexc.HTTPUnauthorized)
+        self._mock_error_response(wexc.HTTPError.code,
+                                  err_code='599',
+                                  err_text=u'Fake error')
         self.assertRaises(cexc.ApicResponseNotOk,
                           self.apic.login, TEST_USR, TEST_PWD)
 
     def test_client_session_logout_ok(self):
+        self._mock_ok_response('aaaLogout', userName=TEST_USR)
         self.apic.logout()
         self.assertIsNone(self.apic.authentication)
         # Multiple signouts should not cause an error
@@ -143,41 +147,111 @@ class TestCiscoApicClientMockController(base.BaseTestCase):
         self.assertIsNone(self.apic.authentication)
 
     def test_client_session_logout_fail(self):
-        self._mock_response('aaaLogout', status='fail')  # TODO
+        self._mock_authenticate()
+        self._mock_ok_response('aaaLogout', status='fail')
         self.apic.logout()
         self.assertIsNone(self.apic.authentication)
 
+    def test_query_not_logged_in(self):
+        self.apic.authentication = None
+        self.assertRaises(cexc.ApicSessionNotLoggedIn,
+                          self.apic.fvTenant.get, TEST_TENANT)
+
+    def test_query_no_response(self):
+        self._mock_authenticate()
+        self.mocked_get.return_value = None
+        self.assertRaises(cexc.ApicHostNoResponse,
+                          self.apic.fvTenant.get, TEST_TENANT)
+
+    def test_query_error_response_no_data(self):
+        self._mock_authenticate()
+        self._mock_error_response(wexc.HTTPError.code)
+        del self.mocked_response[:]
+        self.assertRaises(cexc.ApicResponseNotOk,
+                          self.apic.fvTenant.get, TEST_TENANT)
+
     def test_query_top_system(self):
-        self._mock_response('topSystem', name='ifc1')
+        self._mock_authenticate()
+        self._mock_ok_response('topSystem', name='ifc1')
         top_system = self.apic.get_data('class/topSystem')
         self.assertIsNotNone(top_system)
         name = top_system[0]['topSystem']['attributes']['name']
         self.assertEqual(name, 'ifc1')
 
-    def test_lookup_nonexistant_tenant(self):
+    def test_lookup_nonexistant_mo(self):
+        self._mock_authenticate()
         self.mock_get_response.json.return_value = {}
         self.assertFalse(self.apic.fvTenant.get(TEST_TENANT))
 
-    def test_lookup_existing_tenant(self):
-        self._mock_response('fvTenant', name='infra')
+    def test_lookup_existing_mo(self):
+        self._mock_authenticate()
+        self._mock_ok_response('fvTenant', name='infra')
         tenant = self.apic.fvTenant.get('infra')
         name = tenant[0]['fvTenant']['attributes']['name']
         self.assertEqual(name, 'infra')
 
-    def test_list_tenants(self):
-        self._mock_response('fvTenant', name='t1')
-        self._mock_response('fvTenant', name='t2')
+    def test_list_mos(self):
+        self._mock_authenticate()
+        self._mock_ok_response('fvTenant', name='t1')
+        self._mock_response_append('fvTenant', name='t2')
         tlist = self.apic.fvTenant.list_all()
         self.assertIsNotNone(tlist)
         self.assertEqual(len(tlist), 2)
         # Could test list order but real APIC does not guarantee it
 
-    def test_delete_tenant_ok(self):
+    def test_delete_mo_ok(self):
+        self._mock_authenticate()
         self.assertFalse(self.apic.fvTenant.delete(TEST_TENANT))
 
-    def test_delete_tenant_fail(self):
-        self._mock_response('fvTenant', status='fail')
+    def test_delete_mo_fail(self):
+        self._mock_authenticate()
+        self._mock_ok_response('fvTenant', status='fail')
         self.assertFalse(self.apic.fvTenant.delete(TEST_TENANT))
+
+    def test_create_mo_ok(self):
+        self._mock_authenticate()
+        self.apic.fvTenant.create(TEST_TENANT)
+        self._mock_ok_response('fvTenant', name=TEST_TENANT)
+        tenant = self.apic.fvTenant.get(TEST_TENANT)
+        self.assertEqual(self.apic.fvTenant.attr(tenant, 'name'),
+                         TEST_TENANT)
+
+    def test_create_mo_already_exists(self):
+        self._mock_authenticate()
+        self._mock_error_response(wexc.HTTPBadRequest,
+                                  err_code='103',
+                                  err_text=u'Fake 103 error')
+        self.apic.fvTenant.create(TEST_TENANT)
+
+    def test_create_mo_with_prereq(self):
+        self._mock_authenticate()
+        self.apic.fvBD.create(TEST_TENANT, TEST_NETWORK)
+        self._mock_ok_response('fvBD', name=TEST_NETWORK)
+        network = self.apic.fvBD.get(TEST_TENANT, TEST_NETWORK)
+        self.assertEqual(self.apic.fvBD.attr(network, 'name'), TEST_NETWORK)
+
+    def test_create_mo_prereq_exists(self):
+        self._mock_authenticate()
+        self.apic.vmmDomP.create(TEST_VMMP, TEST_DOMAIN)
+        self._mock_ok_response('vmmDomP', name=TEST_DOMAIN)
+        dom = self.apic.vmmDomP.get(TEST_VMMP, TEST_DOMAIN)
+        self.assertEqual(self.apic.vmmDomP.attr(dom, 'name'), TEST_DOMAIN)
+
+    def test_create_mo_fails(self):
+        self._mock_authenticate()
+        self._mock_error_response(wexc.HTTPBadRequest,
+                                  err_code='not103',
+                                  err_text=u'Fake not103 error')
+        self.assertRaises(cexc.ApicResponseNotOk,
+                          self.apic.fvBD.create, TEST_TENANT, TEST_NETWORK)
+
+    def test_update_mo(self):
+        self._mock_authenticate()
+        self.apic.fvTenant.update(TEST_TENANT, more='extra')
+        self._mock_ok_response('fvTenant', name=TEST_TENANT, more='extra')
+        tenant = self.apic.fvTenant.get(TEST_TENANT)
+        self.assertEqual(self.apic.fvTenant.attr(tenant, 'name'), TEST_TENANT)
+        self.assertEqual(self.apic.fvTenant.attr(tenant, 'more'), 'extra')
 
 
 # TODO(Henry): this should go in tempest 3rd party, not unit test

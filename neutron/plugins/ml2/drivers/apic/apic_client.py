@@ -17,13 +17,21 @@
 from collections import namedtuple
 
 import json
+import logging
 import requests
 from webob import exc as wexc
 
+from neutron.openstack.common import excutils
 from neutron.plugins.ml2.drivers.cisco import exceptions as cexc
 
+
+LOG = logging.getLogger(__name__)
+
+
 # Info about a MO's RN format and container class
-MoPath = namedtuple('MoPath', ['container', 'rn_fmt'])
+class MoPath(namedtuple('MoPath', ['container', 'rn_fmt', 'can_create'])):
+    def __new__(cls, container, rn_fmt, can_create=True):
+        return super(MoPath, cls).__new__(cls, container, rn_fmt, can_create)
 
 supported_mos = {
     'fvTenant': MoPath(None, 'tn-%s'),
@@ -46,7 +54,7 @@ supported_mos = {
     'vzInTerm': MoPath('vzSubj', 'intmnl'),
     'vzOutTerm': MoPath('vzSubj', 'outtmnl'),
 
-    'vmmProvP': MoPath(None, 'vmmp-%s'),
+    'vmmProvP': MoPath(None, 'vmmp-%s', False),
     'vmmDomP': MoPath('vmmProvP', 'dom-%s'),
 
     'infra': MoPath(None, 'infra'),
@@ -92,9 +100,12 @@ class MoClass(object):
         global supported_mos
         self.klass = mo_class
         self.klass_name = mo_class.split('__')[0]
-        self.container = supported_mos[mo_class].container
-        self.rn_fmt = supported_mos[mo_class].rn_fmt
+        mo = supported_mos[mo_class]
+        self.container = mo.container
+        self.rn_fmt = mo.rn_fmt
         self.dn_fmt, self.params = self._dn_fmt()
+        self.param_count = self.dn_fmt.count('%s')
+        self.can_create = self.param_count and mo.can_create
 
     def _dn_fmt(self):
         """Recursively build the DN format using container and RN.
@@ -142,7 +153,7 @@ def requestdata(request_func):
         Extract the data from the response and return it.
     """
     def wrapper(self, *args, **kwargs):
-        if self.client.username and not self.client.authentication:
+        if not self.client.authentication:
             raise cexc.ApicSessionNotLoggedIn
         url, data, response = request_func(self, *args, **kwargs)
         if response is None:
@@ -154,13 +165,15 @@ def requestdata(request_func):
         imdata = unicode2str(response.json()).get('imdata')
         if response.status_code != wexc.HTTPOk.code:
             try:
+                err_code = imdata[0]['error']['attributes']['code']
                 err_text = imdata[0]['error']['attributes']['text']
             except (IndexError, KeyError):
+                err_code = '[code for APIC error not found]'
                 err_text = '[text for APIC error not found]'
             raise cexc.ApicResponseNotOk(request=request,
-                                         status_code=response.status_code,
+                                         status=response.status_code,
                                          reason=response.reason,
-                                         text=err_text)
+                                         err_text=err_text, err_code=err_code)
         return imdata
     return wrapper
 
@@ -242,24 +255,21 @@ class MoManager(ApicSession):
     def _create_prereqs(self, *params):
         if self.mo.container:
             prereq = MoManager(self.client, self.mo.container)
-            prereq.create(*(params[0: prereq.mo.dn_fmt.count('%s')]))
+            if prereq.mo.can_create:
+                prereq.create(*(params[0: prereq.mo.param_count]))
 
     def create(self, *params, **attrs):
         self._create_prereqs(*params)
-        # Use existing object if it's already created
-        obj = self.get(*params)
-        if not obj:
+        try:
             attrs['status'] = 'created'
             self._post_mo(self.mo, *params, **attrs)
-        elif attrs:
-            # Existing MO found, update any attrs that differ
-            updated_attrs = {}
-            for attr, new_val in attrs.items():
-                old_val = self.attr(obj, attr)
-                if new_val != old_val:
-                    updated_attrs[attr] = new_val
-            if updated_attrs:
-                self._post_mo(self.mo, *params, **updated_attrs)
+        except cexc.ApicResponseNotOk as e:
+            if e.apic_err_code != '103':
+                with excutils.save_and_reraise_exception():
+                    # This reraises the exception
+                    pass
+            LOG.debug("Ignoring '%s' for %s" % (e.apic_err_text,
+                                                e.http_request))
 
     def get(self, *params):
         return self._get_mo(self.mo, *params)
@@ -308,6 +318,7 @@ class RestClient(ApicSession):
     def login(self, usr, pwd):
         """Log in to server. Save user name and authentication."""
         name_pwd = self._make_data('aaaUser', name=usr, pwd=pwd)
+        self.authentication = 'trying'  # placate the request wrapper
         self.authentication = self.post_data('aaaLogin', data=name_pwd)
         self.username = usr
         return self.authentication
@@ -319,4 +330,4 @@ class RestClient(ApicSession):
         if self.authentication:
             data = self._make_data('aaaUser', name=self.username)
             self.post_data('aaaLogout', data=data)
-            self.authentication = None
+        self.authentication = None
