@@ -1,4 +1,4 @@
-# Copyright (c) 2013 Cisco Systems
+# Copyright (c) 2013, 2014 Cisco Systems
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -13,6 +13,17 @@
 # under the License.
 #
 # @author: Henry Gessau, Cisco Systems
+#
+# TODO(Henry): Instantiate supported MOs on demand instead of creating all of
+# them up front in the client.
+#
+# TODO(Henry): Instead of (*params, **attrs) arguments, maybe it is better to
+# have (param_dict, attr_dict). This would force the caller to name all the
+# params and attributes via keys in the dicts, and the client can do stricter
+# checking of the arguments.
+#
+# TODO(Henry): MoManager.get() should return a ManagedObject containing the
+# data, with attr() access.
 
 from collections import namedtuple
 
@@ -21,7 +32,6 @@ import logging
 import requests
 from webob import exc as wexc
 
-from neutron.openstack.common import excutils
 from neutron.plugins.ml2.drivers.cisco import exceptions as cexc
 
 
@@ -108,7 +118,8 @@ class MoClass(object):
         self.rn_fmt = mo.rn_fmt
         self.dn_fmt, self.params = self._dn_fmt()
         self.param_count = self.dn_fmt.count('%s')
-        self.can_create = self.param_count and mo.can_create
+        rn_has_param = self.rn_fmt.count('%s')
+        self.can_create = rn_has_param and mo.can_create
 
     def _dn_fmt(self):
         """Recursively build the DN format using container and RN.
@@ -248,38 +259,36 @@ class MoManager(ApicSession):
         self.client = client
         self.mo = MoClass(mo_class)
 
-    def _mo_names(self, mo_list):
-        """Extract a list of just the names of the managed objects."""
-        return [mo[self.mo.klass_name]['attributes']['name'] for mo in mo_list]
-
     def attr(self, obj, key):
-        return obj[0][self.mo.klass_name]['attributes'][key]
+        klass = self.mo.klass_name
+        if obj and isinstance(obj, list):
+            obj = obj[0]
+        if not obj:
+            raise cexc.ApicMoAttrObjectIsNone(attr=key, klass=klass)
+        return obj[klass]['attributes'][key]
 
-    def _create_prereqs(self, *params):
+    def _create_container(self, *params):
+        """Recursively create all container objects."""
         if self.mo.container:
-            prereq = MoManager(self.client, self.mo.container)
-            if prereq.mo.can_create:
-                prereq.create(*(params[0: prereq.mo.param_count]))
+            container = MoManager(self.client, self.mo.container)
+            if container.mo.can_create:
+                container_params = params[0: container.mo.param_count]
+                container._create_container(*container_params)
+                container._post_mo(container.mo, *container_params)
 
     def create(self, *params, **attrs):
-        self._create_prereqs(*params)
-        try:
+        self._create_container(*params)
+        if self.mo.can_create:
             attrs['status'] = 'created'
-            self._post_mo(self.mo, *params, **attrs)
-        except cexc.ApicResponseNotOk as e:
-            if e.apic_err_code != '103':
-                with excutils.save_and_reraise_exception():
-                    # This reraises the exception
-                    pass
-            LOG.debug("Ignoring '%s' for %s" % (e.apic_err_text,
-                                                e.http_request))
+        self._post_mo(self.mo, *params, **attrs)
 
     def get(self, *params):
         return self._get_mo(self.mo, *params)
 
     def list_all(self):
-        mo_list = self._list_mo(self.mo)
-        return self._mo_names(mo_list)
+        mos = self._list_mo(self.mo)
+        # Return just the names
+        return [mo[self.mo.klass_name]['attributes']['name'] for mo in mos]
 
     def update(self, *params, **attrs):
         self._post_mo(self.mo, *params, **attrs)
@@ -298,8 +307,8 @@ class RestClient(ApicSession):
         authentication  Login info. None if not logged in to controller.
     """
 
-    def __init__(self, host, port=80, usr=None, pwd=None, api='api',
-                 ssl=False):
+    def __init__(self, host, port=80, usr=None, pwd=None,
+                 api='api', ssl=False):
         """Establish a session with the APIC."""
         protocol = ssl and 'https' or 'http'
         self.api_base = '%s://%s:%s/%s' % (protocol, host, port, api)
