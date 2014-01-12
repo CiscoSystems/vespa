@@ -1,4 +1,4 @@
-# Copyright (c) 2013 Cisco Systems
+# Copyright (c) 2013, 2014 Cisco Systems
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -15,7 +15,7 @@
 # @author: Henry Gessau, Cisco Systems
 
 import mock
-import requests  # noqa
+# import requests  # noqa
 from webob import exc as wexc
 
 from neutron.common import log
@@ -56,6 +56,7 @@ TEST_ENTRY = 'FrontDoor'
 
 TEST_VMMP = 'VMware'  # Change to 'OpenStack' when APIC supports it
 TEST_DOMAIN = 'MyCloud'
+TEST_PDOM = 'SkidRow'
 
 TEST_NODE_PROF = 'red'
 TEST_LEAF = 'green'
@@ -70,8 +71,8 @@ TEST_ACC_PORT_GRP = 'alpha'
 TEST_ATT_ENT_PROF = 'gadget'
 TEST_VLAN_NAME = 'hydro'
 TEST_VLAN_MODE = 'dynamic'
-TEST_VLAN_FROM = 'vlan-2'
-TEST_VLAN_TO = 'vlan-4000'
+TEST_VLAN_FROM = 'vlan-200'
+TEST_VLAN_TO = 'vlan-299'
 
 
 class TestCiscoApicClientMockController(base.BaseTestCase):
@@ -200,7 +201,6 @@ class TestCiscoApicClientMockController(base.BaseTestCase):
         tlist = self.apic.fvTenant.list_all()
         self.assertIsNotNone(tlist)
         self.assertEqual(len(tlist), 2)
-        # Could test list order but real APIC does not guarantee it
 
     def test_delete_mo_ok(self):
         self._mock_authenticate()
@@ -224,13 +224,15 @@ class TestCiscoApicClientMockController(base.BaseTestCase):
         self._mock_error_response(wexc.HTTPBadRequest,
                                   err_code='103',
                                   err_text=u'Fake 103 error')
-        self.apic.fvTenant.create(TEST_TENANT)
+        self.assertRaises(cexc.ApicResponseNotOk,
+                          self.apic.vmmProvP.create, TEST_VMMP)
 
     def test_create_mo_with_prereq(self):
         self._mock_authenticate()
-        self.apic.fvBD.create(TEST_TENANT, TEST_NETWORK)
+        bd_args = TEST_TENANT, TEST_NETWORK
+        self.apic.fvBD.create(*bd_args)
         self._mock_ok_response('fvBD', name=TEST_NETWORK)
-        network = self.apic.fvBD.get(TEST_TENANT, TEST_NETWORK)
+        network = self.apic.fvBD.get(*bd_args)
         self.assertEqual(self.apic.fvBD.attr(network, 'name'), TEST_NETWORK)
 
     def test_create_mo_prereq_exists(self):
@@ -242,11 +244,12 @@ class TestCiscoApicClientMockController(base.BaseTestCase):
 
     def test_create_mo_fails(self):
         self._mock_authenticate()
+        bd_args = TEST_TENANT, TEST_NETWORK
         self._mock_error_response(wexc.HTTPBadRequest,
                                   err_code='not103',
                                   err_text=u'Fake not103 error')
         self.assertRaises(cexc.ApicResponseNotOk,
-                          self.apic.fvBD.create, TEST_TENANT, TEST_NETWORK)
+                          self.apic.fvBD.create, *bd_args)
 
     def test_update_mo(self):
         self._mock_authenticate()
@@ -255,6 +258,21 @@ class TestCiscoApicClientMockController(base.BaseTestCase):
         tenant = self.apic.fvTenant.get(TEST_TENANT)
         self.assertEqual(self.apic.fvTenant.attr(tenant, 'name'), TEST_TENANT)
         self.assertEqual(self.apic.fvTenant.attr(tenant, 'more'), 'extra')
+
+    def test_attr_fail_not_list(self):
+        obj = None
+        self.assertRaises(cexc.ApicMoAttrObjectIsNone,
+                          self.apic.fvTenant.attr, obj, 'dn')
+
+    def test_attr_fail_empty_list(self):
+        obj = []
+        self.assertRaises(cexc.ApicMoAttrObjectIsNone,
+                          self.apic.fvTenant.attr, obj, 'dn')
+
+    def test_attr_fail_empty_obj(self):
+        obj = {}
+        self.assertRaises(cexc.ApicMoAttrObjectIsNone,
+                          self.apic.fvTenant.attr, obj, 'dn')
 
 
 # TODO(Henry): this should go in tempest 3rd party, not unit test
@@ -272,15 +290,59 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
         self.apic.logout()
         self.assertIsNone(self.apic.authentication)
 
-    def delete_test_objects(self):
+    def delete_epg_test_objects(self):
         """In case previous test attempts didn't clean up."""
+        self.apic.fvCtx.delete(TEST_TENANT, TEST_L3CTX)
+        self.apic.fvAEPg.delete(TEST_TENANT, TEST_AP, TEST_EPG)
         self.apic.fvBD.delete(TEST_TENANT, TEST_NETWORK)
         self.apic.fvRsCtx.delete(TEST_TENANT, TEST_NETWORK)
         self.apic.fvCtx.delete(TEST_TENANT, TEST_L3CTX)
         self.apic.fvTenant.delete(TEST_TENANT)
 
+    def delete_dom_test_objects(self):
+        """In case previous test attempts didn't clean up."""
+        leaf_node_args = TEST_NODE_PROF, TEST_LEAF, TEST_LEAF_TYPE
+        node_blk_args = leaf_node_args + (TEST_NODE_BLK,)
+        lhps_args = TEST_PORT_PROF, TEST_PORT_SEL, TEST_PORT_TYPE
+        vinst_args = TEST_VLAN_NAME, TEST_VLAN_MODE
+        eb_args = vinst_args + (TEST_VLAN_FROM, TEST_VLAN_TO)
+        epg_args = TEST_TENANT, TEST_AP, TEST_EPG
+        dom_args = TEST_VMMP, TEST_DOMAIN
+        dom_dn = None
+        domain = self.apic.vmmDomP.get(*dom_args)
+        if domain:
+            dom_dn = self.apic.vmmDomP.attr(domain, 'dn')
+        pp_dn = None
+        port_profile = self.apic.infraAccPortP.get(TEST_PORT_PROF)
+        if port_profile:
+            pp_dn = self.apic.infraAccPortP.attr(port_profile, 'dn')
+        self.apic.fvnsEncapBlk__vlan.delete(*eb_args)
+        self.apic.fvnsVlanInstP.delete(*vinst_args)
+        if dom_dn:
+            self.apic.infraRsDomP.delete(TEST_ATT_ENT_PROF, dom_dn)  # Rs
+        self.apic.infraAttEntityP.delete(TEST_ATT_ENT_PROF)
+        self.apic.infraRsAccBaseGrp.delete(*lhps_args)
+        self.apic.infraAccPortGrp.delete(TEST_ACC_PORT_GRP)
+        port_block2_args = lhps_args + (TEST_PORT_BLK2,)
+        self.apic.infraPortBlk.delete(*port_block2_args)
+        port_block1_args = lhps_args + (TEST_PORT_BLK1,)
+        self.apic.infraPortBlk.delete(*port_block1_args)
+        self.apic.infraHPortS.delete(*lhps_args)
+        if pp_dn:
+            self.apic.infraRsAccPortP.delete(TEST_NODE_PROF, pp_dn)  # Rs
+        self.apic.infraAccPortP.delete(TEST_PORT_PROF)
+        self.apic.infraNodeBlk.delete(*node_blk_args)
+        self.apic.infraLeafS.delete(*leaf_node_args)
+        self.apic.infraNodeP.delete(TEST_NODE_PROF)
+        if dom_dn:
+            dom_ref_args = epg_args + (dom_dn,)
+            self.apic.fvRsDomAtt.delete(*dom_ref_args)  # Rs
+        self.apic.vmmDomP.delete(*dom_args)
+        self.apic.fvAEPg.delete(*epg_args)
+        self.apic.fvTenant.delete(TEST_TENANT)
+
     def test_cisco_apic_client_session(self):
-        self.delete_test_objects()
+        self.delete_epg_test_objects()
         self.assertIsNotNone(self.apic.authentication)
 
     def test_query_top_system(self):
@@ -291,120 +353,98 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
         self.assertGreater(len(name), 0)
 
     def test_lookup_nonexistant_tenant(self):
+        self.apic.fvTenant.delete(TEST_TENANT)
         self.assertFalse(self.apic.fvTenant.get(TEST_TENANT))
 
     def test_lookup_existing_tenant(self):
         tenant = self.apic.fvTenant.get('infra')
-        self.assertEqual(tenant[0]['fvTenant']['attributes']['name'], 'infra')
-
-    def test_create_and_lookup_tenant(self):
-        self.apic.fvTenant.delete(TEST_TENANT)
-        self.apic.fvTenant.create(TEST_TENANT)
-        new_tenant = self.apic.fvTenant.get(TEST_TENANT)
-        self.assertIsNotNone(new_tenant)
-        self.apic.fvTenant.delete(TEST_TENANT)
-        self.assertFalse(self.apic.fvTenant.get(TEST_TENANT))
+        tenant_name = self.apic.fvTenant.attr(tenant, 'name')
+        self.assertEqual(tenant_name, 'infra')
 
     def test_lookup_nonexistant_network(self):
         self.assertFalse(self.apic.fvBD.get('LarryKing', 'CableNews'))
 
-    def test_create_and_lookup_network(self):
-        self.apic.fvBD.delete(TEST_TENANT, TEST_NETWORK)
+    def test_create_tenant_network_subnet(self):
+        bd_args = TEST_TENANT, TEST_NETWORK
+        subnet_args = TEST_TENANT, TEST_NETWORK, TEST_SUBNET
+        self.apic.fvSubnet.delete(*subnet_args)
+        self.apic.fvBD.delete(*bd_args)
         self.apic.fvTenant.delete(TEST_TENANT)
-        self.apic.fvBD.create(TEST_TENANT, TEST_NETWORK)
-        new_network = self.apic.fvBD.get(TEST_TENANT, TEST_NETWORK)
-        self.assertIsNotNone(new_network)
+        # ----
+        self.apic.fvSubnet.create(*subnet_args)
+        new_sn = self.apic.fvSubnet.get(*subnet_args)
+        self.assertTrue(new_sn)
+        new_network = self.apic.fvBD.get(*bd_args)
+        self.assertTrue(new_network)
         tenant = self.apic.fvTenant.get(TEST_TENANT)
-        self.assertIsNotNone(tenant)
-        self.apic.fvBD.delete(TEST_TENANT, TEST_NETWORK)
-        self.assertFalse(self.apic.fvBD.get(TEST_TENANT, TEST_NETWORK))
-        self.apic.fvTenant.delete(TEST_TENANT)
-        self.assertFalse(self.apic.fvTenant.get(TEST_TENANT))
-
-    def test_create_and_lookup_subnet(self):
-        self.apic.fvSubnet.delete(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
-        self.apic.fvTenant.delete(TEST_TENANT)
-        self.apic.fvSubnet.create(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
-        new_sn = self.apic.fvSubnet.get(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
-        self.assertIsNotNone(new_sn)
-        tenant = self.apic.fvTenant.get(TEST_TENANT)
-        self.assertIsNotNone(tenant)
-        self.apic.fvSubnet.delete(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
-        self.assertFalse(self.apic.fvSubnet.get(TEST_TENANT, TEST_NETWORK,
-                                                TEST_SUBNET))
+        self.assertTrue(tenant)
+        # ----
+        self.apic.fvSubnet.delete(*subnet_args)
+        self.assertFalse(self.apic.fvSubnet.get(*subnet_args))
+        self.apic.fvBD.delete(*bd_args)
+        self.assertFalse(self.apic.fvBD.get(*bd_args))
         self.apic.fvTenant.delete(TEST_TENANT)
         self.assertFalse(self.apic.fvTenant.get(TEST_TENANT))
 
     def test_create_bd_with_subnet_and_l3ctx(self):
-        self.delete_test_objects()
-        self.apic.fvSubnet.create(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
-        new_sn = self.apic.fvSubnet.get(TEST_TENANT, TEST_NETWORK,
-                                        TEST_SUBNET)
-        self.assertIsNotNone(new_sn)
+        self.delete_epg_test_objects()
+        self.addCleanup(self.delete_epg_test_objects)
+        # ----
+        bd_args = TEST_TENANT, TEST_NETWORK
+        subnet_args = TEST_TENANT, TEST_NETWORK, TEST_SUBNET
+        self.apic.fvSubnet.create(*subnet_args)
+        new_sn = self.apic.fvSubnet.get(*subnet_args)
+        self.assertTrue(new_sn)
         tenant = self.apic.fvTenant.get(TEST_TENANT)
-        self.assertIsNotNone(tenant)
-        bd = self.apic.fvBD.get(TEST_TENANT, TEST_NETWORK)
-        self.assertIsNotNone(bd)
-        sn = self.apic.fvSubnet.get(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
-        self.assertIsNotNone(sn)
+        self.assertTrue(tenant)
+        bd = self.apic.fvBD.get(*bd_args)
+        self.assertTrue(bd)
+        sn = self.apic.fvSubnet.get(*subnet_args)
+        self.assertTrue(sn)
         # create l3ctx on tenant
-        self.apic.fvCtx.create(TEST_TENANT, TEST_L3CTX)
-        new_l3ctx = self.apic.fvCtx.get(TEST_TENANT, TEST_L3CTX)
-        self.assertIsNotNone(new_l3ctx)
-        l3c = self.apic.fvCtx.get(TEST_TENANT, TEST_L3CTX)
-        self.assertIsNotNone(l3c)
+        ctx_args = TEST_TENANT, TEST_L3CTX
+        self.apic.fvCtx.create(*ctx_args)
+        new_l3ctx = self.apic.fvCtx.get(*ctx_args)
+        self.assertTrue(new_l3ctx)
+        l3c = self.apic.fvCtx.get(*ctx_args)
+        self.assertTrue(l3c)
         # assocate l3ctx with TEST_NETWORK
-        self.apic.fvRsCtx.create(TEST_TENANT, TEST_NETWORK)
-        new_rsctx = self.apic.fvRsCtx.get(TEST_TENANT, TEST_NETWORK)
-        self.assertIsNotNone(new_rsctx)
-        self.apic.fvRsCtx.update(TEST_TENANT, TEST_NETWORK,
-                                 tnFvCtxName=TEST_L3CTX)
-        rsctx = self.apic.fvRsCtx.get(TEST_TENANT, TEST_NETWORK)
-        self.assertEqual(self.apic.fvRsCtx.attr(rsctx, 'tnFvCtxName'),
-                         TEST_L3CTX)
-        bd = self.apic.fvBD.get(TEST_TENANT, TEST_NETWORK)
-        self.assertIsNotNone(bd)
+        self.apic.fvRsCtx.create(*bd_args)
+        new_rsctx = self.apic.fvRsCtx.get(*bd_args)
+        self.assertTrue(new_rsctx)
+        self.apic.fvRsCtx.update(*bd_args, tnFvCtxName=TEST_L3CTX)
+        rsctx = self.apic.fvRsCtx.get(*bd_args)
+        ctx_name = self.apic.fvRsCtx.attr(rsctx, 'tnFvCtxName')
+        self.assertEqual(ctx_name, TEST_L3CTX)
+        bd = self.apic.fvBD.get(*bd_args)
+        self.assertTrue(bd)
         # delete l3ctx
-        self.apic.fvCtx.delete(TEST_TENANT, TEST_L3CTX)
+        self.apic.fvCtx.delete(*ctx_args)
         # tenant and BD should still exist
         tenant = self.apic.fvTenant.get(TEST_TENANT)
-        self.assertIsNotNone(tenant)
-        bd = self.apic.fvBD.get(TEST_TENANT, TEST_NETWORK)
-        self.assertIsNotNone(bd)
-        self.apic.fvSubnet.delete(TEST_TENANT, TEST_NETWORK, TEST_SUBNET)
-        self.assertFalse(self.apic.fvSubnet.get(TEST_TENANT, TEST_NETWORK,
-                                                TEST_SUBNET))
-        self.apic.fvTenant.delete(TEST_TENANT)
-        self.assertFalse(self.apic.fvTenant.get(TEST_TENANT))
+        self.assertTrue(tenant)
+        bd = self.apic.fvBD.get(*bd_args)
+        self.assertTrue(bd)
 
     def test_create_epg_with_bd(self):
-        self.delete_test_objects()
-
+        self.delete_epg_test_objects()
+        self.addCleanup(self.delete_epg_test_objects)
+        # ----
         bd_args = TEST_TENANT, TEST_NETWORK
         epg_args = TEST_TENANT, TEST_AP, TEST_EPG
-
         self.apic.fvBD.create(*bd_args)
         bd = self.apic.fvBD.get(*bd_args)
-        self.assertIsNotNone(bd)
-
+        self.assertTrue(bd)
+        self.apic.fvAEPg.create(*epg_args)
+        epg = self.apic.fvAEPg.get(*epg_args)
+        self.assertTrue(epg)
         bd_name = self.apic.fvBD.attr(bd, 'name')
-        # create fvRsBd
+        # associate BD with EPG
         self.apic.fvRsBd.create(*epg_args, tnFvBDName=bd_name)
         rs_bd = self.apic.fvRsBd.get(*epg_args)
-        self.assertIsNotNone(rs_bd)
-        epg = self.apic.fvAEPg.get(*epg_args)
-        self.assertIsNotNone(epg)
-
-        # delete epg
-        self.apic.fvAEPg.delete(*epg_args)
-        # tenant and BD should still exist
-        tenant = self.apic.fvTenant.get(TEST_TENANT)
-        self.assertIsNotNone(tenant)
-        bd = self.apic.fvBD.get(*bd_args)
-        self.assertIsNotNone(bd)
-        self.assertFalse(self.apic.fvAEPg.get(*epg_args))
-        self.apic.fvTenant.delete(TEST_TENANT)
-        self.assertFalse(self.apic.fvTenant.get(TEST_TENANT))
+        self.assertTrue(rs_bd)
+        assoc = self.apic.fvRsBd.attr(rs_bd, 'tnFvBDName')
+        self.assertEqual(assoc, bd_name)
 
     def test_list_tenants(self):
         tlist = self.apic.fvTenant.list_all()
@@ -415,8 +455,14 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
         self.assertGreater(len(nlist), 0)
 
     def test_list_subnets(self):
+        bd_args = TEST_TENANT, TEST_NETWORK
+        subnet_args = TEST_TENANT, TEST_NETWORK, TEST_SUBNET
+        self.apic.fvSubnet.create(*subnet_args)
         snlist = self.apic.fvSubnet.list_all()
         self.assertGreater(len(snlist), 0)
+        self.apic.fvSubnet.delete(*subnet_args)
+        self.apic.fvBD.delete(*bd_args)
+        self.apic.fvTenant.delete(TEST_TENANT)
 
     def test_list_app_profiles(self):
         aplist = self.apic.fvAp.list_all()
@@ -431,36 +477,50 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
         new_contract = self.apic.vzBrCP.get(TEST_TENANT, TEST_CONTRACT)
         self.assertTrue(new_contract)
         tenant = self.apic.fvTenant.get(TEST_TENANT)
-        self.assertIsNotNone(tenant)
+        self.assertTrue(tenant)
         self.apic.vzBrCP.delete(TEST_TENANT, TEST_CONTRACT)
         self.assertFalse(self.apic.vzBrCP.get(TEST_TENANT, TEST_CONTRACT))
         self.apic.fvTenant.delete(TEST_TENANT)
         self.assertFalse(self.apic.fvTenant.get(TEST_TENANT))
 
     def test_create_and_lookup_entry(self):
-        self.apic.vzEntry.delete(TEST_TENANT, TEST_FILTER, TEST_ENTRY)
+        filter_args = TEST_TENANT, TEST_FILTER
+        entry_args = TEST_TENANT, TEST_FILTER, TEST_ENTRY
+        self.apic.vzEntry.delete(*entry_args)
         self.apic.fvTenant.delete(TEST_TENANT)
-        self.apic.vzEntry.create(TEST_TENANT, TEST_FILTER, TEST_ENTRY)
-        new_sn = self.apic.vzEntry.get(TEST_TENANT, TEST_FILTER, TEST_ENTRY)
-        self.assertIsNotNone(new_sn)
+        self.apic.vzEntry.create(*entry_args)
+        new_sn = self.apic.vzEntry.get(*entry_args)
+        self.assertTrue(new_sn)
         tenant = self.apic.fvTenant.get(TEST_TENANT)
-        self.assertIsNotNone(tenant)
-        self.apic.vzEntry.update(TEST_TENANT, TEST_FILTER, TEST_ENTRY,
-                                 prot='udp', dToPort='pop3')
-        self.apic.vzEntry.delete(TEST_TENANT, TEST_FILTER, TEST_ENTRY)
-        self.assertFalse(self.apic.vzEntry.get(TEST_TENANT, TEST_FILTER,
-                                               TEST_ENTRY))
+        self.assertTrue(tenant)
+        self.apic.vzEntry.update(*entry_args, prot='udp', dToPort='pop3')
+        self.apic.vzEntry.delete(*entry_args)
+        self.assertFalse(self.apic.vzEntry.get(*entry_args))
+        self.apic.vzFilter.delete(*filter_args)
+        self.assertFalse(self.apic.vzFilter.get(*filter_args))
         self.apic.fvTenant.delete(TEST_TENANT)
         self.assertFalse(self.apic.fvTenant.get(TEST_TENANT))
 
+    def test_create_physical_domain(self):
+        # Create a Physical Domain Profile
+        self.apic.physDomP.create(TEST_PDOM)
+        pdom = self.apic.physDomP.get(TEST_PDOM)
+        self.assertTrue(pdom)
+        pdom_dn = self.apic.physDomP.attr(pdom, 'dn')
+        self.assertEqual(pdom_dn, "uni/phys-%s" % TEST_PDOM)
+        self.apic.physDomP.delete(TEST_PDOM)
+        pdom = self.apic.physDomP.get(TEST_PDOM)
+        self.assertFalse(pdom)
+
     def test_create_domain_vlan_node_mappings(self):
+        self.delete_dom_test_objects()
+        self.addCleanup(self.delete_dom_test_objects)
 
         # Create a VMM Domain for the cloud
         dom_args = TEST_VMMP, TEST_DOMAIN
         self.apic.vmmDomP.create(*dom_args)
-        self.apic.vmmDomP.create(*dom_args)
         domain = self.apic.vmmDomP.get(*dom_args)
-        self.assertIsNotNone(domain)
+        self.assertTrue(domain)
 
         # Get the DN of the VMM domain
         dom_dn = self.apic.vmmDomP.attr(domain, 'dn')
@@ -470,188 +530,113 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
         epg_args = TEST_TENANT, TEST_AP, TEST_EPG
         dom_ref_args = epg_args + (dom_dn,)
         self.apic.fvRsDomAtt.create(*dom_ref_args)
-        self.apic.fvRsDomAtt.create(*dom_ref_args)
         dom_ref = self.apic.fvRsDomAtt.get(*dom_ref_args)
-        self.assertIsNotNone(dom_ref)
+        self.assertTrue(dom_ref)
 
         # Create a Node Profile
         self.apic.infraNodeP.create(TEST_NODE_PROF)
-        self.apic.infraNodeP.create(TEST_NODE_PROF)
         node_profile = self.apic.infraNodeP.get(TEST_NODE_PROF)
-        self.assertIsNotNone(node_profile)
+        self.assertTrue(node_profile)
 
         # Add a Leaf Node Selector to the Node Profile
         leaf_node_args = TEST_NODE_PROF, TEST_LEAF, TEST_LEAF_TYPE
         self.apic.infraLeafS.create(*leaf_node_args)
-        self.apic.infraLeafS.create(*leaf_node_args)
         leaf_node = self.apic.infraLeafS.get(*leaf_node_args)
-        self.assertIsNotNone(leaf_node)
+        self.assertTrue(leaf_node)
 
         # Add a Node Block to the Leaf Node Selector
         node_blk_args = leaf_node_args + (TEST_NODE_BLK,)
-        self.apic.infraNodeBlk.create(*node_blk_args, from_='17', to_='17')
-        self.apic.infraNodeBlk.create(*node_blk_args, from_='17', to_='17')
+        self.apic.infraNodeBlk.create(*node_blk_args, from_='13', to_='13')
         node_block = self.apic.infraNodeBlk.get(*node_blk_args)
-        self.assertIsNotNone(node_block)
+        self.assertTrue(node_block)
 
         # Create a Port Profile and get its DN
         self.apic.infraAccPortP.create(TEST_PORT_PROF)
-        self.apic.infraAccPortP.create(TEST_PORT_PROF)
         port_profile = self.apic.infraAccPortP.get(TEST_PORT_PROF)
-        self.assertIsNotNone(port_profile)
+        self.assertTrue(port_profile)
         pp_dn = self.apic.infraAccPortP.attr(port_profile, 'dn')
         self.assertEqual(pp_dn, 'uni/infra/accportprof-%s' % TEST_PORT_PROF)
 
         # Associate the Port Profile with the Node Profile
         self.apic.infraRsAccPortP.create(TEST_NODE_PROF, pp_dn)
-        self.apic.infraRsAccPortP.create(TEST_NODE_PROF, pp_dn)
         ppref = self.apic.infraRsAccPortP.get(TEST_NODE_PROF, pp_dn)
-        self.assertIsNotNone(ppref)
+        self.assertTrue(ppref)
 
         # Add a Leaf Host Port Selector to the Port Profile
         lhps_args = TEST_PORT_PROF, TEST_PORT_SEL, TEST_PORT_TYPE
         self.apic.infraHPortS.create(*lhps_args)
-        self.apic.infraHPortS.create(*lhps_args)
         lhps = self.apic.infraHPortS.get(*lhps_args)
-        self.assertIsNotNone(lhps)
+        self.assertTrue(lhps)
 
         # Add a Port Block to the Leaf Host Port Selector
         port_block1_args = lhps_args + (TEST_PORT_BLK1,)
         self.apic.infraPortBlk.create(
             *port_block1_args,
             fromCard='1', toCard='1', fromPort='10', toPort='12')
-        self.apic.infraPortBlk.create(
-            *port_block1_args,
-            fromCard='1', toCard='1', fromPort='10', toPort='12')
         port_block1 = self.apic.infraPortBlk.get(*port_block1_args)
-        self.assertIsNotNone(port_block1)
+        self.assertTrue(port_block1)
 
         # Add another Port Block to the Leaf Host Port Selector
         port_block2_args = lhps_args + (TEST_PORT_BLK2,)
         self.apic.infraPortBlk.create(
             *port_block2_args,
             fromCard='1', toCard='1', fromPort='20', toPort='22')
-        self.apic.infraPortBlk.create(
-            *port_block2_args,
-            fromCard='1', toCard='1', fromPort='20', toPort='22')
         port_block2 = self.apic.infraPortBlk.get(*port_block2_args)
-        self.assertIsNotNone(port_block2)
+        self.assertTrue(port_block2)
 
         # Create an Access Port Group and get its DN
         self.apic.infraAccPortGrp.create(TEST_ACC_PORT_GRP)
-        self.apic.infraAccPortGrp.create(TEST_ACC_PORT_GRP)
         access_pg = self.apic.infraAccPortGrp.get(TEST_ACC_PORT_GRP)
-        self.assertIsNotNone(access_pg)
+        self.assertTrue(access_pg)
         apg_dn = self.apic.infraAccPortGrp.attr(access_pg, 'dn')
         self.assertEqual(apg_dn, 'uni/infra/funcprof/accportgrp-%s' %
                                  TEST_ACC_PORT_GRP)
 
         # Associate the Access Port Group with Leaf Host Port Selector
         self.apic.infraRsAccBaseGrp.create(*lhps_args, tDn=apg_dn)
-        self.apic.infraRsAccBaseGrp.create(*lhps_args, tDn=apg_dn)
         apg_ref = self.apic.infraRsAccBaseGrp.get(*lhps_args)
-        self.assertIsNotNone(apg_ref)
+        self.assertTrue(apg_ref)
 
         # Create an Attached Entity Profile
         self.apic.infraAttEntityP.create(TEST_ATT_ENT_PROF)
-        self.apic.infraAttEntityP.create(TEST_ATT_ENT_PROF)
         ae_profile = self.apic.infraAttEntityP.get(TEST_ATT_ENT_PROF)
-        self.assertIsNotNone(ae_profile)
+        self.assertTrue(ae_profile)
         aep_dn = self.apic.infraAttEntityP.attr(ae_profile, 'dn')
         self.assertEqual(aep_dn, 'uni/infra/attentp-%s' % TEST_ATT_ENT_PROF)
 
         # Associate the cloud domain with the Attached Entity Profile
         self.apic.infraRsDomP.create(TEST_ATT_ENT_PROF, dom_dn)
-        self.apic.infraRsDomP.create(TEST_ATT_ENT_PROF, dom_dn)
         dom_ref = self.apic.infraRsDomP.get(TEST_ATT_ENT_PROF, dom_dn)
-        self.assertIsNotNone(dom_ref)
+        self.assertTrue(dom_ref)
 
         # Associate the aep with the apg
         self.apic.infraRsAttEntP.create(TEST_ACC_PORT_GRP, tDn=aep_dn)
-        self.apic.infraRsAttEntP.create(TEST_ACC_PORT_GRP, tDn=aep_dn)
         aep_ref = self.apic.infraRsAttEntP.get(TEST_ACC_PORT_GRP)
-        self.assertIsNotNone(aep_ref)
+        self.assertTrue(aep_ref)
 
         # Create a Vlan Instance Profile
         vinst_args = TEST_VLAN_NAME, TEST_VLAN_MODE
         self.apic.fvnsVlanInstP.create(*vinst_args)
-        self.apic.fvnsVlanInstP.create(*vinst_args)
         vlan_instp = self.apic.fvnsVlanInstP.get(*vinst_args)
-        self.assertIsNotNone(vlan_instp)
+        self.assertTrue(vlan_instp)
 
         # Create an Encap Block for the Vlan Instance Profile
         eb_args = vinst_args + (TEST_VLAN_FROM, TEST_VLAN_TO)
-        eb_data = {'name': 'encap', 'from': 'vlan-2', 'to': 'vlan-4000'}
-        self.apic.fvnsEncapBlk__vlan.create(*eb_args, **eb_data)
+        eb_data = {'name': 'encap',
+                   'from': TEST_VLAN_FROM, 'to': TEST_VLAN_TO}
         self.apic.fvnsEncapBlk__vlan.create(*eb_args, **eb_data)
         encap_blk = self.apic.fvnsEncapBlk__vlan.get(*eb_args)
-        self.assertIsNotNone(encap_blk)
+        self.assertTrue(encap_blk)
 
         # Associate a Vlan Name Space with a Domain
         vlanns = self.apic.fvnsVlanInstP.attr(vlan_instp, 'dn')
         self.apic.infraRsVlanNs.create(*dom_args, tDn=vlanns)
-        self.apic.infraRsVlanNs.create(*dom_args, tDn=vlanns)
         vlanns_ref = self.apic.infraRsVlanNs.get(*dom_args)
-        self.assertIsNotNone(vlanns_ref)
+        self.assertTrue(vlanns_ref)
 
         # Check if the vmm:EpPD is created
         eppd_args = dom_args + (dom_dn,)
         eppd = self.apic.vmmEpPD.get(*eppd_args)
-        self.assertIsNotNone(eppd)
-        eppd_dn = self.apic.vmmEpPD.attr(eppd, 'dn')
-        print eppd_dn
-
-        # ---------------------------
-        # Delete all in reverse order
-        # ---------------------------
-
-        self.apic.fvnsEncapBlk__vlan.delete(*eb_args)
-        self.assertFalse(self.apic.fvnsEncapBlk__vlan.get(*eb_args))
-
-        self.apic.fvnsVlanInstP.delete(*vinst_args)
-        self.assertFalse(self.apic.fvnsVlanInstP.get(*vinst_args))
-
-        self.apic.infraRsAttEntP.delete(TEST_ACC_PORT_GRP)
-        self.assertFalse(self.apic.infraRsAttEntP.get(TEST_ACC_PORT_GRP))
-
-        self.apic.infraRsDomP.delete(TEST_ATT_ENT_PROF, dom_dn)
-        self.assertFalse(self.apic.infraRsDomP.get(TEST_ATT_ENT_PROF, dom_dn))
-
-        self.apic.infraAttEntityP.delete(TEST_ATT_ENT_PROF)
-        self.assertFalse(self.apic.infraAttEntityP.get(TEST_ATT_ENT_PROF))
-
-        self.apic.infraRsAccBaseGrp.delete(*lhps_args)
-        self.assertFalse(self.apic.infraRsAccBaseGrp.get(*lhps_args))
-
-        self.apic.infraAccPortGrp.delete(TEST_ACC_PORT_GRP)
-        self.assertFalse(self.apic.infraAccPortGrp.get(TEST_ACC_PORT_GRP))
-
-        self.apic.infraPortBlk.delete(*port_block2_args)
-        self.assertFalse(self.apic.infraPortBlk.get(*port_block2_args))
-
-        self.apic.infraPortBlk.delete(*port_block1_args)
-        self.assertFalse(self.apic.infraPortBlk.get(*port_block1_args))
-
-        self.apic.infraHPortS.delete(*lhps_args)
-        self.assertFalse(self.apic.infraHPortS.get(*lhps_args))
-
-        self.apic.infraRsAccPortP.delete(TEST_NODE_PROF, pp_dn)
-        self.assertFalse(self.apic.infraRsAccPortP.get(TEST_NODE_PROF, pp_dn))
-
-        self.apic.infraAccPortP.delete(TEST_PORT_PROF)
-        self.assertFalse(self.apic.infraAccPortP.get(TEST_PORT_PROF))
-
-        self.apic.infraNodeBlk.delete(*node_blk_args)
-        self.assertFalse(self.apic.infraNodeBlk.get(*node_blk_args))
-
-        self.apic.infraLeafS.delete(*leaf_node_args)
-        self.assertFalse(self.apic.infraLeafS.get(*leaf_node_args))
-
-        self.apic.infraNodeP.delete(TEST_NODE_PROF)
-        self.assertFalse(self.apic.infraNodeP.get(TEST_NODE_PROF))
-
-        self.apic.fvRsDomAtt.delete(*dom_ref_args)
-        self.assertFalse(self.apic.fvRsDomAtt.get(*dom_ref_args))
-
-        self.apic.vmmDomP.delete(*dom_args)
-        self.assertFalse(self.apic.vmmDomP.get(*dom_args))
+        #self.assertTrue(eppd)
+        #eppd_dn = self.apic.vmmEpPD.attr(eppd, 'dn')
+        #print eppd_dn

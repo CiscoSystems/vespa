@@ -85,6 +85,7 @@ class ApicHostNoResponse(exceptions.NotFound):
 
 class ApicResponseNotOk(exceptions.NeutronException):
     """A response from the APIC was not HTTP OK."""
+    # TODO(Henry): remove line breaks in logs
     message = _("APIC responded with HTTP status %(status)s: %(reason)s\n"
                 "Request: '%(request)s'\n"
                 "APIC error code %(err_code)s: %(err_text)s")
@@ -102,3 +103,8 @@ class ApicResponseNotOk(exceptions.NeutronException):
 class ApicSessionNotLoggedIn(exceptions.NotAuthorized):
     """Attempted APIC operation while not logged in to APIC."""
     message = _("Authorized APIC session not established")
+
+
+class ApicMoAttrObjectIsNone(exceptions.NeutronException):
+    """Attempted data operation on a 'None' managed object."""
+    message = _("Cannot access '%(attr)s' attribute of empty %(klass)s object")
