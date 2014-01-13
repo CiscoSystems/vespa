@@ -44,6 +44,7 @@ supported_mos = {
     'fvAEPg': MoPath('fvAp', 'epg-%s'),
     'fvRsProv': MoPath('fvAEPg', 'rsprov-%s'),
     'fvRsCons': MoPath('fvAEPg', 'rscons-%s'),
+    'fvRsConsIf': MoPath('fvAEPg', 'rsconsif-%s'),
     'fvRsDomAtt': MoPath('fvAEPg', 'rsdomAtt-[%s]'),
     'fvRsPathAtt': MoPath('fvAEPg', 'rspathAtt-[%s]'),
 
@@ -54,6 +55,8 @@ supported_mos = {
     'vzEntry': MoPath('vzFilter', 'e-%s'),
     'vzInTerm': MoPath('vzSubj', 'intmnl'),
     'vzOutTerm': MoPath('vzSubj', 'outtmnl'),
+    'vzCPIf': MoPath('fvTenant', 'cif-%s'),
+    'vzRsIf': MoPath('vzCPIf', 'rsif'),
 
     'vmmProvP': MoPath(None, 'vmmp-%s', False),
     'vmmDomP': MoPath('vmmProvP', 'dom-%s'),
