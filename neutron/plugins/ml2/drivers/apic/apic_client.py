@@ -45,6 +45,7 @@ supported_mos = {
     'fvRsProv': MoPath('fvAEPg', 'rsprov-%s'),
     'fvRsCons': MoPath('fvAEPg', 'rscons-%s'),
     'fvRsDomAtt': MoPath('fvAEPg', 'rsdomAtt-[%s]'),
+    'fvRsPathAtt': MoPath('fvAEPg', 'rspathAtt-[%s]'),
 
     'vzBrCP': MoPath('fvTenant', 'brc-%s'),
     'vzSubj': MoPath('vzBrCP', 'subj-%s'),
