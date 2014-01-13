@@ -103,8 +103,3 @@ class ApicResponseNotOk(exceptions.NeutronException):
 class ApicSessionNotLoggedIn(exceptions.NotAuthorized):
     """Attempted APIC operation while not logged in to APIC."""
     message = _("Authorized APIC session not established")
-
-
-class ApicMoAttrObjectIsNone(exceptions.NeutronException):
-    """Attempted data operation on a 'None' managed object."""
-    message = _("Cannot access '%(attr)s' attribute of empty %(klass)s object")

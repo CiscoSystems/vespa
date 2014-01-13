@@ -52,12 +52,12 @@ class APICManager(object):
         self.apic = apic_client.RestClient(host, port, username, password)
 
         # Update lists of managed objects from the APIC
-        self.apic_tenants = self.apic.fvTenant.list_all()
-        self.apic_bridge_domains = self.apic.fvBD.list_all()
-        self.apic_subnets = self.apic.fvSubnet.list_all()
-        self.apic_app_profiles = self.apic.fvAp.list_all()
-        self.apic_epgs = self.apic.fvAEPg.list_all()
-        self.apic_filters = self.apic.vzFilter.list_all()
+        self.apic_tenants = self.apic.fvTenant.list_names()
+        self.apic_bridge_domains = self.apic.fvBD.list_names()
+        self.apic_subnets = self.apic.fvSubnet.list_names()
+        self.apic_app_profiles = self.apic.fvAp.list_names()
+        self.apic_epgs = self.apic.fvAEPg.list_names()
+        self.apic_filters = self.apic.vzFilter.list_names()
         self.port_profiles = {}
         self.vmm_domain = None
         self.vlan_ns = None
@@ -80,7 +80,7 @@ class APICManager(object):
             # Create port profile for this switch
             pprofile = self.ensure_port_profile_created_on_apic(ppname)
             # Add port profile to node profile
-            ppdn = self.apic.infraAccPortP.attr(pprofile, 'dn')
+            ppdn = pprofile['dn']
             self.apic.infraRsAccPortP.create(switch, ppdn)
 
             # Gather port ranges for this switch
@@ -96,9 +96,9 @@ class APICManager(object):
             for module in modules:
                 # Create host port selector for this module
                 hname = uuid.uuid4()
-                hpselc = self.apic.infraHPortS.create(ppname, hname, 'range')
+                self.apic.infraHPortS.create(ppname, hname, 'range')
                 # Add relation to the function profile
-                fpdn = self.apic.infraAccPortGrp.attr(self.function_profile, 'dn')
+                fpdn = self.function_profile['dn']
                 self.apic.infraRsAccBaseGrp.create(ppname, hname, 'range', tDn=fpdn)
                 modules[module].sort()
                 ranges = self._to_range(modules[module])
@@ -115,7 +115,7 @@ class APICManager(object):
 
     def ensure_entity_profile_created_on_apic(self, name):
         if not self.entity_profile:
-            vmm_dn = self.apic.vmmDomP.attr(self.vmm_domain, 'dn')
+            vmm_dn = self.vmm_domain['dn']
             self.apic.infraAttEntityP.create(name)
             # Attach vmm domain to entity profile
             self.apic.infraRsDomP.create(name, vmm_dn)
@@ -125,7 +125,7 @@ class APICManager(object):
         if not self.function_profile:
             self.apic.infraAccPortGrp.create(name)
             # Attach entity profile to function profile
-            entp_dn = self.apic.infraAttEntityP.attr(self.entity_profile, 'dn')
+            entp_dn = self.entity_profile['dn']
             self.apic.infraRsAttEntP.create(name, tDn=entp_dn)
             self.function_profile = self.apic.infraAccPortGrp.get(name)
             
@@ -156,7 +156,7 @@ class APICManager(object):
             provider = cfg.CONF.ml2_apic.apic_vmm_provider
             self.apic.vmmDomP.create(provider, vmm_name)
             if vlan_ns:
-                vlan_ns_dn = self.apic.fvnsVlanInstP.attr(vlan_ns, 'dn')
+                vlan_ns_dn = vlan_ns['dn']
                 self.apic.infraRsVlanNs.create(provider, vmm_name, tDn=vlan_ns_dn)
             elif vxlan_ns:
                 # TODO: (asomya) Add VXLAN bits bere
@@ -211,7 +211,7 @@ class APICManager(object):
 
     def get_epg_list_from_apic(self):
         """Get a list of all EPG's from the APIC."""
-        self.apic_epgs = self.apic.fvAEPg.list_all()
+        self.apic_epgs = self.apic.fvAEPg.list_names()
 
     def search_for_epg_with_net_and_secgroups(self, network_id,
                                               security_groups):
@@ -235,21 +235,20 @@ class APICManager(object):
 
         # Create a new EPG on the APIC
         epg_uid = str(uuid.uuid4())
-        lepg = self.apic.fvAEPg.create(tenant_id, AP_NAME, epg_uid)
+        self.apic.fvAEPg.create(tenant_id, AP_NAME, epg_uid)
 
         # Add bd to EPG
         bd = self.apic.fvBD.get(tenant_id, network_id)
-        bd_name = self.apic.fvBD.attr(bd, 'name')
+        bd_name = bd['name']
 
         # create fvRsBd
         self.apic.fvRsBd.create(tenant_id, AP_NAME, epg_uid, tnFvBDName=bd_name)
-        rs_bd = self.apic.fvRsBd.update(tenant_id, AP_NAME, epg_uid, tnFvBDName=bd_name)
 
         # Add VMM to EPG
-        dom_cloud = self.apic.vmmDomP.create('VMware', 'openstack')
+        self.apic.vmmDomP.create('VMware', 'openstack')
         dom_cloud = self.apic.vmmDomP.get('VMware', 'openstack')
-        vmm_dn = self.apic.vmmDomP.attr(dom_cloud, 'dn')
-        domatt = self.apic.fvRsDomAtt.create(tenant_id, AP_NAME, epg_uid, vmm_dn)
+        vmm_dn = dom_cloud['dn']
+        self.apic.fvRsDomAtt.create(tenant_id, AP_NAME, epg_uid, vmm_dn)
 
         # Get EPG to read the segmentation id
         epgm = self.apic.fvAEPg.get(tenant_id, AP_NAME, epg_uid)
