@@ -22,8 +22,9 @@
 # params and attributes via keys in the dicts, and the client can do stricter
 # checking of the arguments.
 #
-# TODO(Henry): MoManager.get() should return a ManagedObject containing the
-# data, with attr() access.
+# TODO(Henry): Move the 'supported_mos' out of apic_client.py and instead
+# provide an easy way for the user to add the list of MOs that they want to
+# use. A library of MOs could be maintained somewhere?
 
 from collections import namedtuple
 
@@ -209,7 +210,7 @@ class ApicSession(object):
         return json.dumps({key: {'attributes': attrs}})
 
     def _api_url(self, api):
-        """Create the URL for a simple API."""
+        """Create the URL for a generic API."""
         return '%s/%s.json' % (self.api_base, api)
 
     def _mo_url(self, mo, *args):
@@ -219,7 +220,7 @@ class ApicSession(object):
 
     def _qry_url(self, mo):
         """Create a URL for a query lookup by MO class."""
-        return '%s/class/%s.json' % (self.api_base, mo.klass)
+        return '%s/class/%s.json' % (self.api_base, mo.klass_name)
 
     # REST requests
 
@@ -263,14 +264,6 @@ class MoManager(ApicSession):
         self.client = client
         self.mo = MoClass(mo_class)
 
-    def attr(self, obj, key):
-        klass = self.mo.klass_name
-        if obj and isinstance(obj, list):
-            obj = obj[0]
-        if not obj:
-            raise cexc.ApicMoAttrObjectIsNone(attr=key, klass=klass)
-        return obj[klass]['attributes'][key]
-
     def _create_container(self, *params):
         """Recursively create all container objects."""
         if self.mo.container:
@@ -286,13 +279,23 @@ class MoManager(ApicSession):
             attrs['status'] = 'created'
         self._post_mo(self.mo, *params, **attrs)
 
+    def _mo_attributes(self, obj_data):
+        if (self.mo.klass_name in obj_data
+                and 'attributes' in obj_data[self.mo.klass_name]):
+            return obj_data[self.mo.klass_name]['attributes']
+
     def get(self, *params):
-        return self._get_mo(self.mo, *params)
+        """Return a dict of the MO's attributes, or None."""
+        imdata = self._get_mo(self.mo, *params)
+        if imdata:
+            return self._mo_attributes(imdata[0])
 
     def list_all(self):
-        mos = self._list_mo(self.mo)
-        # Return just the names
-        return [mo[self.mo.klass_name]['attributes']['name'] for mo in mos]
+        imdata = self._list_mo(self.mo)
+        return filter(None, [self._mo_attributes(obj) for obj in imdata])
+
+    def list_names(self):
+        return [obj['name'] for obj in self.list_all()]
 
     def update(self, *params, **attrs):
         self._post_mo(self.mo, *params, **attrs)
