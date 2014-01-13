@@ -15,7 +15,6 @@
 # @author: Henry Gessau, Cisco Systems
 
 import mock
-# import requests  # noqa
 from webob import exc as wexc
 
 from neutron.common import log
