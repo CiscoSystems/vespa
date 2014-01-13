@@ -20,24 +20,29 @@ from oslo.config import cfg
 
 from neutron.db import api as db_api
 from neutron.db import model_base
+from neutron.extensions import portbindings
+from neutron.plugins.common import constants
 from neutron.openstack.common import log
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers.apic import apic_client
 from neutron.plugins.ml2.drivers.apic import config
 from neutron.plugins.ml2.drivers.apic.apic_manager import APICManager
 
+
 LOG = log.getLogger(__name__)
 
 
 class APICMechanismDriver(api.MechanismDriver):
     def initialize(self):
+        self.vif_type = portbindings.VIF_TYPE_OVS
+        self.cap_port_filter = False
         self.apic_manager = APICManager()
 
         # Create a VMM domain and VLAN namespace
         # Get vlan ns name
         ns_name = cfg.CONF.ml2_apic.apic_vlan_ns_name
         # Grab vlan ranges
-        (vlan_min, vlan_max) = cfg.CONF.ml2_apic.apic_vlan_range.split(':')
+        (vlan_min, vlan_max) = cfg.CONF.ml2_type_vlan.network_vlan_ranges[0].split(':')[-2:]
         # Create VLAN namespace
         vlan_ns = self.apic_manager.ensure_vlan_ns_created_on_apic(ns_name,
                                                                    vlan_min,
@@ -64,6 +69,8 @@ class APICMechanismDriver(api.MechanismDriver):
 
         # Get network
         network = context.network.current['id']
+        # Get segmentation id
+        seg = context.network.current['provider:segmentation_id']
 
         # Get host binding if any
         host = context.current['binding:host_id']
@@ -76,10 +83,8 @@ class APICMechanismDriver(api.MechanismDriver):
             # Not a VM port, return for now
             return
 
-        # Check for an EPG for this network
-
-    def create_port_postcommit(self, context):
-        pass
+        # Create a static path attachment for this host/epg/switchport combo
+        self.apic_manager.ensure_path_created_for_port(tenant_id, network, host, seg)
 
     def create_network_precommit(self, context):
         net_id = context.current['id']
@@ -111,5 +116,51 @@ class APICMechanismDriver(api.MechanismDriver):
         self.apic_manager.ensure_subnet_created_on_apic(tenant_id, network_id,
                                                         subnet_id, gateway_ip)
 
-    def create_subnet_postcommit(self, context):
-        pass
+    def bind_port(self, context):
+        LOG.debug(_("Attempting to bind port %(port)s on "
+                    "network %(network)s"),
+                   {'port': context.current['id'],
+                   'network': context.network.current['id']})
+        for segment in context.network.network_segments:
+            if self.check_segment(segment):
+                context.set_binding(segment[api.ID],
+                                    self.vif_type,
+                                    self.cap_port_filter)
+                LOG.debug(_("Bound using segment: %s"), segment)
+                return
+            else:
+                LOG.error(_("Failed binding port for segment ID %(id)s, "
+                            "segment %(seg)s, phys net %(physnet)s, and "
+                            "network type %(nettype)s"),
+                          {'id': segment[api.ID],
+                           'seg': segment[api.SEGMENTATION_ID],
+                           'physnet': segment[api.PHYSICAL_NETWORK],
+                           'nettype': segment[api.NETWORK_TYPE]})
+
+    def check_segment(self, segment):
+        """Verify a segment is valid for the OpenDaylight MechanismDriver
+
+        Verify the requested segment is supported by ODL and return True or
+        False to indicate this to callers.
+        """
+        network_type = segment[api.NETWORK_TYPE]
+        if network_type in [constants.TYPE_LOCAL, constants.TYPE_FLAT,
+                            constants.TYPE_VLAN, constants.TYPE_GRE,
+                            constants.TYPE_VXLAN]:
+            #TODO(mestery): Validate these
+            return True
+        else:
+            return False
+
+    def validate_port_binding(self, context):
+        if self.check_segment(context.bound_segment):
+            LOG.debug(_('Binding valid.'))
+            return True
+        LOG.warning(_("Binding invalid for port: %s"), context.current)
+        return False
+
+    def unbind_port(self, context):
+        LOG.debug(_("Unbinding port %(port)s on "
+                    "network %(network)s"),
+                  {'port': context.current['id'],
+                   'network': context.network.current['id']})

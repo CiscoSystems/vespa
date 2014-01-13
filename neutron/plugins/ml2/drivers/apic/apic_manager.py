@@ -14,6 +14,7 @@
 #    under the License.
 #
 # @author: Arvind Somya (asomya@cisco.com), Cisco Systems Inc.
+
 import itertools
 import sqlalchemy as sa
 import uuid
@@ -39,6 +40,18 @@ class NetworkEPG(model_base.BASEV2):
                            primary_key=True)
     epg_id = sa.Column(sa.String(64), nullable=False)
     segmentation_id = sa.Column(sa.String(64), nullable=False)
+
+class PortProfile(model_base.BASEV2):
+    """Port profiles created on the APIC"""
+
+    __tablename__ = 'ml2_apic_port_profiles'
+
+    node_id = sa.Column(sa.String(64), nullable=False, primary_key=True)
+    profile_id = sa.Column(sa.String(64), nullable=False)
+    hpselc_id = sa.Column(sa.String(64), nullable=False)
+    module = sa.Column(sa.String(10), nullable=False)
+    from_port = sa.Column(sa.Integer(10), nullable=False)
+    to_port = sa.Column(sa.Integer(10), nullable=False)
 
 class APICManager(object):
     def __init__(self):
@@ -66,22 +79,57 @@ class APICManager(object):
         self.function_profile = None
 
     def _to_range(self, i):
+        i.sort()
         for a, b in itertools.groupby(enumerate(i), lambda (x, y): y - x):
             b = list(b)
             yield b[0][1], b[-1][1]
+
+    def get_port_profile_for_node(self, node_id):
+        session = db_api.get_session()
+        return session.query(PortProfile).filter_by(node_id=node_id).first()
+
+    def get_profile_for_module_and_ports(self, node_id, profile_id,
+                                         module, from_port, to_port):
+        session = db_api.get_session()
+        return session.query(PortProfile).filter_by(node_id=node_id,
+                                                    module=module,
+                                                    profile_id=profile_id,
+                                                    from_port=from_port,
+                                                    to_port=to_port).first()
+
+    def get_profile_for_module(self, node_id, profile_id, module):
+        session = db_api.get_session()
+        return session.query(PortProfile).filter_by(node_id=node_id,
+                                                    profile_id=profile_id,
+                                                    module=module).first()
+
+    def add_profile_for_module_and_ports(self, node_id, profile_id, hpselc_id,
+                                         module, from_port, to_port):
+        session = db_api.get_session()
+        row = PortProfile(node_id=node_id, profile_id=profile_id,
+                          hpselc_id=hpselc_id, module=module,
+                          from_port=from_port, to_port=to_port)
+        session.add(row)
+        session.flush()
 
     def ensure_infra_created_on_apic(self):
         # Loop over switches
         for switch in self.switch_dict.keys():
             # Create a node profile for this switch
             self.ensure_node_profile_created_for_switch(switch)
-            # Generate uuid for port profile name
-            ppname = uuid.uuid4()
-            # Create port profile for this switch
-            pprofile = self.ensure_port_profile_created_on_apic(ppname)
-            # Add port profile to node profile
-            ppdn = self.apic.infraAccPortP.attr(pprofile, 'dn')
-            self.apic.infraRsAccPortP.create(switch, ppdn)
+
+            # Check if a port profile exists for this node
+            ppname = None
+            if not self.get_port_profile_for_node(switch):
+                # Generate uuid for port profile name
+                ppname = uuid.uuid4()
+                # Create port profile for this switch
+                pprofile = self.ensure_port_profile_created_on_apic(ppname)
+                # Add port profile to node profile
+                ppdn = self.apic.infraAccPortP.attr(pprofile, 'dn')
+                self.apic.infraRsAccPortP.create(switch, ppdn)
+            else:
+                ppname = self.get_port_profile_for_node(switch).profile_id
 
             # Gather port ranges for this switch
             ports = self.switch_dict[switch].keys()
@@ -94,24 +142,36 @@ class APICManager(object):
                 modules[module].append(int(sw_port))
             # Sort modules and convert to ranges if possible
             for module in modules:
-                # Create host port selector for this module
-                hname = uuid.uuid4()
-                hpselc = self.apic.infraHPortS.create(ppname, hname, 'range')
-                # Add relation to the function profile
-                fpdn = self.apic.infraAccPortGrp.attr(self.function_profile, 'dn')
-                self.apic.infraRsAccBaseGrp.create(ppname, hname, 'range', tDn=fpdn)
-                modules[module].sort()
+                hname = None
+                if not self.get_profile_for_module(switch, ppname, module):
+                    # Create host port selector for this module
+                    hname = uuid.uuid4()
+                    hpselc = self.apic.infraHPortS.create(ppname, hname, 'range')
+                    # Add relation to the function profile
+                    fpdn = self.apic.infraAccPortGrp.attr(self.function_profile, 'dn')
+                    self.apic.infraRsAccBaseGrp.create(ppname, hname, 'range', tDn=fpdn)
+                    modules[module].sort()
+                else:
+                    hname = self.get_profile_for_module(switch, ppname, module).hpselc_id
+ 
                 ranges = self._to_range(modules[module])
                 # Add this module and ports to the profile
                 for prange in ranges:
-                    # Create port block for this port range
-                    pbname = uuid.uuid4()
-                    self.apic.infraPortBlk.create(ppname, hname, 'range',
-                                                  pbname, fromCard=module,
-                                                  toCard=module,
-                                                  fromPort=str(prange[0]),
-                                                  toPort=str(prange[-1]))
-           
+                    # Check if this port block is already added to the profile
+                    if not self.get_profile_for_module_and_ports(
+                           switch, ppname, module, prange[0], prange[-1]):
+                        # Create port block for this port range
+                        pbname = uuid.uuid4()
+                        self.apic.infraPortBlk.create(ppname, hname, 'range',
+                                                      pbname, fromCard=module,
+                                                      toCard=module,
+                                                      fromPort=str(prange[0]),
+                                                      toPort=str(prange[-1]))
+                        # Add DB row
+                        self.add_profile_for_module_and_ports(switch, 
+                                                              ppname, hname,
+                                                              module, prange[0],
+                                                              prange[-1])
 
     def ensure_entity_profile_created_on_apic(self, name):
         if not self.entity_profile:
@@ -130,6 +190,7 @@ class APICManager(object):
             self.function_profile = self.apic.infraAccPortGrp.get(name)
             
     def ensure_node_profile_created_for_switch(self, switch_id):
+        self.apic.infraNodeP.delete(switch_id)
         sobj = self.apic.infraNodeP.get(switch_id)
         if not sobj:
             # Create Node profile
@@ -165,11 +226,11 @@ class APICManager(object):
 
     def ensure_vlan_ns_created_on_apic(self, name, vlan_min, vlan_max):
         if not self.vlan_ns:
-            ns_args = name, 'dynamic'
+            ns_args = name, 'static'
             self.apic.fvnsVlanInstP.create(*ns_args)
             vlan_min = 'vlan-' + vlan_min
             vlan_max = 'vlan-' + vlan_max
-            ns_blk_args = name, 'dynamic', vlan_min, vlan_max
+            ns_blk_args = name, 'static', vlan_min, vlan_max
             self.vlan_encap = self.apic.fvnsEncapBlk__vlan.get(*ns_blk_args)
             if not self.vlan_encap:
                 ns_kw_args = {'name': 'encap', 'from': vlan_min, 'to': vlan_max}
@@ -271,3 +332,19 @@ class APICManager(object):
         # Remove DB row
         session.delete(epg)
         session.flush()
+
+    def _get_switch_and_port_for_host(self, host_id):
+        for switch in self.switch_dict.keys():
+            for port in self.switch_dict[switch].keys():
+                if host_id in self.switch_dict[switch][port]:
+                    return (switch, port)
+
+    def ensure_path_created_for_port(self, tenant_id, network_id, host_id, encap):
+        encap = 'vlan-' + str(encap)
+        epg = self.ensure_epg_created_for_network(tenant_id, network_id)
+        eid = epg.epg_id
+
+        # Get attached switch and port for this host
+        switch, port = self._get_switch_and_port_for_host(host_id)
+        pdn = 'topology/pod-1/paths-%s/pathep-[eth%s]' % (switch, port)
+        self.apic.fvRsPathAtt.create(tenant_id, AP_NAME, eid, pdn, encap=encap, mode="regular")
