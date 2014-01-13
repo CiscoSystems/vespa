@@ -95,6 +95,12 @@ supported_mos = {
     'fvnsEncapBlk__vlan': MoPath('fvnsVlanInstP', 'from-%s-to-%s'),
     'fvnsVxlanInstP': MoPath('infra', 'vxlanns-%s'),
     'fvnsEncapBlk__vxlan': MoPath('fvnsVxlanInstP', 'from-%s-to-%s'),
+
+    # Read-only
+    'fabricTopology': MoPath(None, 'topology', False),
+    'fabricPod': MoPath('fabricTopology', 'pod-%s', False),
+    'fabricPathEpCont': MoPath('fabricPod', 'paths-%s', False),
+    'fabricPathEp': MoPath('fabricPathEpCont', 'pathep-%s', False),
 }
 
 
