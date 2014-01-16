@@ -213,6 +213,8 @@ class APICManager(object):
         return self.apic.infraAccPortP.get(name)
 
     def ensure_vmm_domain_created_on_apic(self, vmm_name, vlan_ns=None, vxlan_ns=None):
+        provider = cfg.CONF.ml2_apic.apic_vmm_provider
+        self.vmm_domain = self.apic.vmmDomP.get(provider, vmm_name)
         if not self.vmm_domain:
             provider = cfg.CONF.ml2_apic.apic_vmm_provider
             self.apic.vmmDomP.create(provider, vmm_name)
@@ -225,8 +227,9 @@ class APICManager(object):
             self.vmm_domain = self.apic.vmmDomP.get(provider, vmm_name)
 
     def ensure_vlan_ns_created_on_apic(self, name, vlan_min, vlan_max):
+        ns_args = name, 'static'
+        self.vlan_ns = self.apic.fvnsVlanInstP.get(*ns_args)
         if not self.vlan_ns:
-            ns_args = name, 'static'
             self.apic.fvnsVlanInstP.create(*ns_args)
             vlan_min = 'vlan-' + vlan_min
             vlan_max = 'vlan-' + vlan_max
