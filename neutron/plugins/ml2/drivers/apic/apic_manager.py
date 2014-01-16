@@ -174,6 +174,7 @@ class APICManager(object):
                                                               prange[-1])
 
     def ensure_entity_profile_created_on_apic(self, name):
+        self.entity_profile = self.apic.infraAttEntityP.get(name)
         if not self.entity_profile:
             vmm_dn = self.vmm_domain['dn']
             self.apic.infraAttEntityP.create(name)
@@ -182,6 +183,7 @@ class APICManager(object):
             self.entity_profile = self.apic.infraAttEntityP.get(name)
 
     def ensure_function_profile_created_on_apic(self, name):
+        self.function_profile = self.apic.infraAccPortGrp.get(name)
         if not self.function_profile:
             self.apic.infraAccPortGrp.create(name)
             # Attach entity profile to function profile
