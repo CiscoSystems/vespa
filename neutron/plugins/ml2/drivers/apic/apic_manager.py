@@ -311,7 +311,6 @@ class APICManager(object):
         self.apic.fvRsBd.create(tenant_id, AP_NAME, epg_uid, tnFvBDName=bd_name)
 
         # Add VMM to EPG
-        self.apic.vmmDomP.create('VMware', 'openstack')
         dom_cloud = self.apic.vmmDomP.get('VMware', 'openstack')
         vmm_dn = dom_cloud['dn']
         self.apic.fvRsDomAtt.create(tenant_id, AP_NAME, epg_uid, vmm_dn)

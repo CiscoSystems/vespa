@@ -209,6 +209,7 @@ class ApicSession(object):
         self.client = client
         self.api_base = client.api_base
         self.session = client.session
+        self.cookie = self.client.cookie
 
     @staticmethod
     def _make_data(key, **attrs):
@@ -234,32 +235,32 @@ class ApicSession(object):
     def get_data(self, request):
         """Retrieve generic data from the server."""
         url = self._api_url(request)
-        return url, None, self.session.get(url)
+        return url, None, self.session.get(url, cookies=self.cookie)
 
     @requestdata
     def _get_mo(self, mo, *args):
         """Retrieve a MO by DN."""
         url = self._mo_url(mo, *args) + '?query-target=self'
-        return url, None, self.session.get(url)
+        return url, None, self.session.get(url, cookies=self.cookie)
 
     @requestdata
     def _list_mo(self, mo):
         """Retrieve the list of MOs for a class."""
         url = self._qry_url(mo)
-        return url, None, self.session.get(url)
+        return url, None, self.session.get(url, cookies=self.cookie)
 
     @requestdata
     def post_data(self, request, data):
         """Post generic data to the server."""
         url = self._api_url(request)
-        return url, data, self.session.post(url, data=data)
+        return url, data, self.session.post(url, data=data, cookies=self.cookie)
 
     @requestdata
     def _post_mo(self, mo, *args, **data):
         """Post data for MO to the server."""
         url = self._mo_url(mo, *args)
         data = self._make_data(mo.klass_name, **data)
-        return url, data, self.session.post(url, data=data)
+        return url, data, self.session.post(url, data=data, cookies=self.cookie)
 
 
 class MoManager(ApicSession):
@@ -326,6 +327,7 @@ class RestClient(ApicSession):
         protocol = ssl and 'https' or 'http'
         self.api_base = '%s://%s:%s/%s' % (protocol, host, port, api)
         self.session = requests.Session()
+        self.cookie = {}
 
         # Initialize the session methods
         super(RestClient, self).__init__(self)
@@ -345,6 +347,8 @@ class RestClient(ApicSession):
         name_pwd = self._make_data('aaaUser', name=usr, pwd=pwd)
         self.authentication = 'trying'  # placate the request wrapper
         self.authentication = self.post_data('aaaLogin', data=name_pwd)
+        self.token = self.authentication[0]['aaaLogin']['attributes']['token']
+        self.cookie = {'APIC-Cookie': self.token}
         self.username = usr
         return self.authentication
 
