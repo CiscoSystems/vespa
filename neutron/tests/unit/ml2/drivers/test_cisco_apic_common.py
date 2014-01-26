@@ -162,10 +162,11 @@ class ConfigMixin(object):
             cfg.CONF.set_override(opt, val, 'ml2_apic')
         self.addCleanup(cfg.CONF.reset)
 
-        apic_switch_config = {
+        apic_switch_cfg = {
             'switch:east01': {'ubuntu1,ubuntu2': [11]},
             'switch:east02': {'rhel01,rhel02': [21]},
         }
-        self.mocked_parser = mock.patch.object(cfg, 'MultiConfigParser').start()
-        self.mocked_parser.return_value.read.return_value = [apic_switch_config]
-        self.mocked_parser.return_value.parsed = [apic_switch_config]
+        self.mocked_parser = mock.patch.object(cfg,
+                                               'MultiConfigParser').start()
+        self.mocked_parser.return_value.read.return_value = [apic_switch_cfg]
+        self.mocked_parser.return_value.parsed = [apic_switch_cfg]

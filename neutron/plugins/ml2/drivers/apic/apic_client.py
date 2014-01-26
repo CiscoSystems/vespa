@@ -27,6 +27,7 @@
 # use. A library of MOs could be maintained somewhere?
 
 from collections import namedtuple
+import time
 
 import json
 import logging
@@ -172,14 +173,17 @@ def requestdata(request_func):
     """Decorator for REST requests.
 
     Before:
-        Verify there is an authenticated session (logged in to APIC)
+        Verify the session is authenticated (logged in to APIC)
+        If the session has timed out, refresh it.
     After:
         Verify we got a response and it is HTTP OK.
         Extract the data from the response and return it.
     """
     def wrapper(self, *args, **kwargs):
-        if not self.client.authentication:
+        if not self.authentication:
             raise cexc.ApicSessionNotLoggedIn
+        if time.time() > self.session_deadline:
+            self.refresh()
         url, data, response = request_func(self, *args, **kwargs)
         if response is None:
             raise cexc.ApicHostNoResponse(url=url)
@@ -205,11 +209,19 @@ def requestdata(request_func):
 
 class ApicSession(object):
 
-    def __init__(self, client):
-        self.client = client
-        self.api_base = client.api_base
-        self.session = client.session
-        self.cookie = self.client.cookie
+    def __init__(self, host, port, usr, pwd, ssl):
+        protocol = ssl and 'https' or 'http'
+        self.api_base = '%s://%s:%s/api' % (protocol, host, port)
+        self.session = requests.Session()
+        self.session_deadline = 0
+        self.cookie = {}
+
+        # Log in
+        self.authentication = None
+        self.username = None
+        self.password = None
+        if usr and pwd:
+            self.login(usr, pwd)
 
     @staticmethod
     def _make_data(key, **attrs):
@@ -238,13 +250,13 @@ class ApicSession(object):
         return url, None, self.session.get(url, cookies=self.cookie)
 
     @requestdata
-    def _get_mo(self, mo, *args):
+    def get_mo(self, mo, *args):
         """Retrieve a MO by DN."""
         url = self._mo_url(mo, *args) + '?query-target=self'
         return url, None, self.session.get(url, cookies=self.cookie)
 
     @requestdata
-    def _list_mo(self, mo):
+    def list_mo(self, mo):
         """Retrieve the list of MOs for a class."""
         url = self._qry_url(mo)
         return url, None, self.session.get(url, cookies=self.cookie)
@@ -253,38 +265,105 @@ class ApicSession(object):
     def post_data(self, request, data):
         """Post generic data to the server."""
         url = self._api_url(request)
-        return url, data, self.session.post(url, data=data, cookies=self.cookie)
+        return url, data, self.session.post(url, data=data,
+                                            cookies=self.cookie)
 
     @requestdata
-    def _post_mo(self, mo, *args, **data):
+    def post_mo(self, mo, *args, **data):
         """Post data for MO to the server."""
         url = self._mo_url(mo, *args)
         data = self._make_data(mo.klass_name, **data)
-        return url, data, self.session.post(url, data=data, cookies=self.cookie)
+        return url, data, self.session.post(url, data=data,
+                                            cookies=self.cookie)
+
+    # Session management
+
+    def _save_cookie(self, operation, response):
+        """Save the session cookie and its expiration time."""
+        imdata = unicode2str(response.json()).get('imdata')
+        if response.status_code == wexc.HTTPOk.code:
+            attributes = imdata[0][operation]['attributes']
+            self.cookie = {'APIC-Cookie': attributes['token']}
+            timeout = int(attributes['refreshTimeoutSeconds'])
+            LOG.debug(_("APIC session will expire in %d seconds"), timeout)
+            self.session_deadline = time.time() + timeout
+        else:
+            attributes = imdata[0]['error']['attributes']
+        return attributes
+
+    def login(self, usr, pwd):
+        """Log in to server. Save user name and authentication."""
+        name_pwd = self._make_data('aaaUser', name=usr, pwd=pwd)
+        url = self._api_url('aaaLogin')
+        response = self.session.post(url, data=name_pwd)
+        attributes = self._save_cookie('aaaLogin', response)
+        if response.status_code == wexc.HTTPOk.code:
+            self.username = usr
+            self.password = pwd
+            self.authentication = attributes
+        else:
+            self.authentication = None
+            raise cexc.ApicResponseNotOk(request=url,
+                                         status=response.status_code,
+                                         reason=response.reason,
+                                         err_text=attributes['text'],
+                                         err_code=attributes['code'])
+
+        return self.authentication
+
+    def refresh(self):
+        url = self._api_url('aaaRefresh')
+        response = self.session.get(url, cookies=self.cookie)
+        attributes = self._save_cookie('aaaRefresh', response)
+        if response.status_code == wexc.HTTPOk.code:
+            self.authentication = attributes
+        else:
+            err_code = attributes['code']
+            err_text = attributes['text']
+            if (err_code == '403' and
+                    err_text.lower().startswith('token was invalid')):
+                # Usually means the token timed out, so log in again.
+                LOG.debug(_("APIC session timed-out, logging in again."))
+                self.authentication = self.login(self.username, self.password)
+            else:
+                self.authentication = None
+                raise cexc.ApicResponseNotOk(request=url,
+                                             status=response.status_code,
+                                             reason=response.reason,
+                                             err_text=err_text,
+                                             err_code=err_code)
+
+    def logout(self):
+        """End session with server."""
+        if not self.username:
+            self.authentication = None
+        if self.authentication:
+            data = self._make_data('aaaUser', name=self.username)
+            self.post_data('aaaLogout', data=data)
+        self.authentication = None
 
 
-class MoManager(ApicSession):
+class MoManager(object):
     """CRUD operations on APIC Managed Objects."""
 
-    def __init__(self, client, mo_class):
-        super(MoManager, self).__init__(client)
-        self.client = client
+    def __init__(self, session, mo_class):
+        self.session = session
         self.mo = MoClass(mo_class)
 
     def _create_container(self, *params):
         """Recursively create all container objects."""
         if self.mo.container:
-            container = MoManager(self.client, self.mo.container)
+            container = MoManager(self.session, self.mo.container)
             if container.mo.can_create:
                 container_params = params[0: container.mo.param_count]
                 container._create_container(*container_params)
-                container._post_mo(container.mo, *container_params)
+                container.session.post_mo(container.mo, *container_params)
 
     def create(self, *params, **attrs):
         self._create_container(*params)
         if self.mo.can_create:
             attrs['status'] = 'created'
-        self._post_mo(self.mo, *params, **attrs)
+        self.session.post_mo(self.mo, *params, **attrs)
 
     def _mo_attributes(self, obj_data):
         if (self.mo.klass_name in obj_data
@@ -293,22 +372,22 @@ class MoManager(ApicSession):
 
     def get(self, *params):
         """Return a dict of the MO's attributes, or None."""
-        imdata = self._get_mo(self.mo, *params)
+        imdata = self.session.get_mo(self.mo, *params)
         if imdata:
             return self._mo_attributes(imdata[0])
 
     def list_all(self):
-        imdata = self._list_mo(self.mo)
+        imdata = self.session.list_mo(self.mo)
         return filter(None, [self._mo_attributes(obj) for obj in imdata])
 
     def list_names(self):
         return [obj['name'] for obj in self.list_all()]
 
     def update(self, *params, **attrs):
-        self._post_mo(self.mo, *params, **attrs)
+        self.session.post_mo(self.mo, *params, **attrs)
 
     def delete(self, *params):
-        self._post_mo(self.mo, *params, status='deleted')
+        self.session.post_mo(self.mo, *params, status='deleted')
 
 
 class RestClient(ApicSession):
@@ -321,42 +400,10 @@ class RestClient(ApicSession):
         authentication  Login info. None if not logged in to controller.
     """
 
-    def __init__(self, host, port=80, usr=None, pwd=None,
-                 api='api', ssl=False):
+    def __init__(self, host, port=80, usr=None, pwd=None, ssl=False):
         """Establish a session with the APIC."""
-        protocol = ssl and 'https' or 'http'
-        self.api_base = '%s://%s:%s/%s' % (protocol, host, port, api)
-        self.session = requests.Session()
-        self.cookie = {}
+        super(RestClient, self).__init__(host, port, usr, pwd, ssl)
 
-        # Initialize the session methods
-        super(RestClient, self).__init__(self)
-
-        # Log in
-        self.authentication = None
-        self.username = None
-        if usr and pwd:
-            self.login(usr, pwd)
-
-        # Supported objects
+        # Supported objects for OpenStack Neutron
         for mo_class in supported_mos:
             self.__dict__[mo_class] = MoManager(self, mo_class)
-
-    def login(self, usr, pwd):
-        """Log in to server. Save user name and authentication."""
-        name_pwd = self._make_data('aaaUser', name=usr, pwd=pwd)
-        self.authentication = 'trying'  # placate the request wrapper
-        self.authentication = self.post_data('aaaLogin', data=name_pwd)
-        self.token = self.authentication[0]['aaaLogin']['attributes']['token']
-        self.cookie = {'APIC-Cookie': self.token}
-        self.username = usr
-        return self.authentication
-
-    def logout(self):
-        """End session with server."""
-        if not self.username:
-            self.authentication = None
-        if self.authentication:
-            data = self._make_data('aaaUser', name=self.username)
-            self.post_data('aaaLogout', data=data)
-        self.authentication = None

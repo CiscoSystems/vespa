@@ -35,17 +35,22 @@ class TestCiscoApicClient(base.BaseTestCase, mocked.ControllerMixin):
         self.apic = apic.RestClient(mocked.APIC_HOST)
         self.addCleanup(mock.patch.stopall)
 
-    def _mock_authenticate(self):
+    def _mock_authenticate(self, token=None, timeout=None):
+        if token is None:
+            token = 'good'
+        if timeout is None:
+            timeout = 300
+        self._mock_ok_response('aaaLogin', userName=mocked.APIC_USR,
+                               token=token, refreshTimeoutSeconds=timeout)
         self.apic.login(mocked.APIC_USR, mocked.APIC_PWD)
         self.apic.authentication = 'logged in'
 
     def test_client_session_login_ok(self):
-        self._mock_ok_response('aaaLogin', userName=mocked.APIC_USR)
+        self._mock_authenticate()
         self.apic = apic.RestClient(mocked.APIC_HOST, mocked.APIC_PORT,
                                     mocked.APIC_USR, mocked.APIC_PWD)
         self.assertEqual(
-            self.apic.authentication[0]['aaaLogin']['attributes']['userName'],
-            mocked.APIC_USR)
+            self.apic.authentication['userName'], mocked.APIC_USR)
         self.assertTrue(self.apic.api_base.startswith('http://'))
         self.assertEqual(self.apic.username, mocked.APIC_USR)
         self.assertIsNotNone(self.apic.authentication)
@@ -99,6 +104,26 @@ class TestCiscoApicClient(base.BaseTestCase, mocked.ControllerMixin):
         self.assertIsNotNone(top_system)
         name = top_system[0]['topSystem']['attributes']['name']
         self.assertEqual(name, 'ifc1')
+
+    def test_session_timeout_refresh_ok(self):
+        self._mock_authenticate(timeout=-1)
+        self._mock_ok_response('aaaRefresh', token='ok',
+                               refreshTimeoutSeconds=300)
+        self.assertIsNone(self.apic.fvTenant.get('nobody'))
+
+    def test_session_timeout_refresh_error(self):
+        self._mock_authenticate(timeout=-1)
+        self._mock_error_response(wexc.HTTPRequestTimeout)
+        self.assertRaises(cexc.ApicResponseNotOk,
+                          self.apic.fvTenant.get, mocked.APIC_TENANT)
+
+    def test_session_timeout_refresh_timeout_error(self):
+        self._mock_authenticate(timeout=-1)
+        self._mock_error_response(wexc.HTTPBadRequest,
+                                  err_code='403',
+                                  err_text=u'Token was invalid. Expired.')
+        self.assertRaises(cexc.ApicResponseNotOk,
+                          self.apic.fvTenant.get, mocked.APIC_TENANT)
 
     def test_lookup_nonexistant_mo(self):
         self._mock_authenticate()
