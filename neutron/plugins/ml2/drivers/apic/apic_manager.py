@@ -350,4 +350,9 @@ class APICManager(object):
         # Get attached switch and port for this host
         switch, port = self._get_switch_and_port_for_host(host_id)
         pdn = 'topology/pod-1/paths-%s/pathep-[eth%s]' % (switch, port)
-        self.apic.fvRsPathAtt.create(tenant_id, AP_NAME, eid, pdn, encap=encap, mode="regular")
+
+        # Check if exists
+        patt = self.apic.fvRsPathAtt.get(tenant_id, AP_NAME, eid, pdn)
+        if not patt:
+            self.apic.fvRsPathAtt.create(tenant_id, AP_NAME, eid, pdn,
+                                         encap=encap, mode="regular")
