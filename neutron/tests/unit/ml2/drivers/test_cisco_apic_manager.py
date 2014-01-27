@@ -15,9 +15,6 @@
 # @author: Henry Gessau, Cisco Systems
 
 import mock
-from webob import exc as wexc
-
-from oslo.config import cfg
 
 from neutron.common import log
 from neutron.plugins.ml2.drivers.apic import apic_manager as apic

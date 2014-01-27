@@ -16,6 +16,9 @@
 #   \_/ |_| |_|_|___/  \__\___/  \_| \_/\___|\__,_|\__|_|  \___/|_| |_(_)
 #
 
+import sys
+import time
+
 from neutron.common import log
 from neutron.plugins.ml2.drivers.apic import apic_client as apic
 from neutron.plugins.ml2.drivers.cisco import exceptions as cexc
@@ -47,7 +50,7 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
     """
     def setUp(self):
         super(TestCiscoApicClientLiveController, self).setUp()
-        self.apic = apic.RestClient(APIC1_HOST,
+        self.apic = apic.RestClient(APIC2_HOST,
                                     usr=APIC_ADMIN, pwd=APIC_PWD)
         self.addCleanup(self.sign_out)
 
@@ -109,6 +112,12 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
         self.apic.fvTenant.delete(test.APIC_TENANT)
 
     def test_cisco_apic_client_session(self):
+        for t in range(305, -1, -5):
+            print 'Waiting', t
+            time.sleep(5)
+        print
+        print
+        print 'Here goes ...'
         self.delete_epg_test_objects()
         self.assertIsNotNone(self.apic.authentication)
 
@@ -415,7 +424,7 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
         # Check if the vmm:EpPD is created
         eppd_args = dom_args + (dom_dn,)
         eppd = self.apic.vmmEpPD.get(*eppd_args)
-        self.assertIsNone(eppd)  # TODO: fix
+        self.assertIsNone(eppd)  # TODO(Henry): fix this
         #self.assertTrue(eppd)
         #eppd_dn = eppd['dn']
         #print eppd_dn
