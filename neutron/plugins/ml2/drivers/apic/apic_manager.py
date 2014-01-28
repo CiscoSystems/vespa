@@ -261,6 +261,8 @@ class APICManager(object):
         if not bd_id in self.apic_bridge_domains:
             self.apic.fvBD.create(tenant_id, bd_id)
             self.apic_bridge_domains.append(bd_id)
+            # Add default context to the BD
+            self.apic.fvRsCtx.create(tenant_id, bd_id, tnFvCtxName='default')
 
     def delete_bd_on_apic(self, tenant_id, bd_id):
         self.apic.fvBD.delete(tenant_id, bd_id)
