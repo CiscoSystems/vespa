@@ -108,8 +108,6 @@ class TestCiscoApicManager(base.BaseTestCase,
 
     def test_ensure_node_profile_created_for_switch_new(self):
         new_switch = mocked.APIC_NODE_PROF
-        # delete node prof   TODO(Henry): why is this done first?
-        self.mock_ok_post_response('infraNodeP', name=new_switch)
         self.mock_ok_get_response('infraNodeP')
         self.mock_responses_for_create('infraNodeP')
         self.mock_responses_for_create('infraLeafS')
@@ -124,7 +122,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         self.mock_ok_get_response('vmmDomP', name=dom)
         self.mgr.ensure_vmm_domain_created_on_apic(dom)
         old_dom = self.mgr.vmm_domain['name']
-        self.assertEqual(old_dom, mocked.APIC_DOMAIN)
+        self.assertEqual(old_dom, dom)
 
     def _mock_new_dom_responses(self, dom):
         vmm = mocked.APIC_VMMP
@@ -138,7 +136,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         self._mock_new_dom_responses(dom)
         self.mgr.ensure_vmm_domain_created_on_apic(dom)
         new_dom = self.mgr.vmm_domain['name']
-        self.assertEqual(new_dom, mocked.APIC_DOMAIN)
+        self.assertEqual(new_dom, dom)
 
     def _mock_new_vlan_ns_responses(self, ns_dn):
         self.mock_responses_for_create('vmmDomP')
@@ -151,7 +149,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         self._mock_new_vlan_ns_responses(ns['dn'])
         self.mgr.ensure_vmm_domain_created_on_apic(dom, vlan_ns=ns)
         new_dom = self.mgr.vmm_domain['name']
-        self.assertEqual(new_dom, mocked.APIC_DOMAIN)
+        self.assertEqual(new_dom, dom)
 
     def test_ensure_vmm_domain_created_new_with_vxlan_ns(self):
         dom = mocked.APIC_DOMAIN
@@ -160,7 +158,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         self._mock_new_vlan_ns_responses(ns['dn'])
         self.mgr.ensure_vmm_domain_created_on_apic(dom, vxlan_ns=ns)
         new_dom = self.mgr.vmm_domain['name']
-        self.assertEqual(new_dom, mocked.APIC_DOMAIN)
+        self.assertEqual(new_dom, dom)
 
     def test_ensure_infra_created_no_infra(self):
         self.mgr.switch_dict = {}
