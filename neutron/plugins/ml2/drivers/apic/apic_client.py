@@ -107,9 +107,8 @@ supported_mos = {
 
 class MoClass(object):
 
-    # Note(Henry): Yes, I am using a mutable default argument _inst_cache
-    # here. It is not a design flaw, it is exactly what I want: for it to
-    # persist for the life of MoClass to cache instances.
+    # Note(Henry): The use of a mutable default argument _inst_cache is
+    # intentional. It persists for the life of MoClass to cache instances.
     # noinspection PyDefaultArgument
     def __new__(cls, mo_class, _inst_cache={}):
         """Ensure we create only one instance per mo_class."""
@@ -208,6 +207,14 @@ def requestdata(request_func):
 
 
 class ApicSession(object):
+    """
+    Manages a session with the APIC.
+
+    Attributes:
+        api_base        e.g. 'http://10.2.3.45:8000/api'
+        session         The session between client and controller
+        authentication  Login info. None if not logged in to controller.
+    """
 
     def __init__(self, host, port, usr, pwd, ssl):
         protocol = ssl and 'https' or 'http'
@@ -363,7 +370,7 @@ class MoManager(object):
         self._create_container(*params)
         if self.mo.can_create:
             attrs['status'] = 'created'
-        self.session.post_mo(self.mo, *params, **attrs)
+        return self.session.post_mo(self.mo, *params, **attrs)
 
     def _mo_attributes(self, obj_data):
         if (self.mo.klass_name in obj_data
@@ -384,20 +391,15 @@ class MoManager(object):
         return [obj['name'] for obj in self.list_all()]
 
     def update(self, *params, **attrs):
-        self.session.post_mo(self.mo, *params, **attrs)
+        return self.session.post_mo(self.mo, *params, **attrs)
 
     def delete(self, *params):
-        self.session.post_mo(self.mo, *params, status='deleted')
+        return self.session.post_mo(self.mo, *params, status='deleted')
 
 
 class RestClient(ApicSession):
     """
-    APIC REST client class.
-
-    Attributes:
-        api_base        e.g. 'http://10.2.3.45:8000/api'
-        session         The session between client and controller
-        authentication  Login info. None if not logged in to controller.
+    APIC REST client for OpenStack Neutron.
     """
 
     def __init__(self, host, port=80, usr=None, pwd=None, ssl=False):

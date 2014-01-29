@@ -236,16 +236,12 @@ class APICManager(object):
             vlan_min = 'vlan-' + vlan_min
             vlan_max = 'vlan-' + vlan_max
             ns_blk_args = name, 'static', vlan_min, vlan_max
-            self.vlan_encap = self.apic.fvnsEncapBlk__vlan.get(*ns_blk_args)
-            if not self.vlan_encap:
+            vlan_encap = self.apic.fvnsEncapBlk__vlan.get(*ns_blk_args)
+            if not vlan_encap:
                 ns_kw_args = {'name': 'encap', 'from': vlan_min, 'to': vlan_max}
                 self.apic.fvnsEncapBlk__vlan.create(*ns_blk_args, **ns_kw_args)
-            return self.apic.fvnsVlanInstP.get(*ns_args)
-
-    def ensure_node_profile_created_on_apic(self, name):
-        if not self.node_profile:
-            self.apic.infraNodeP.create(name)
-            self.node_profile = self.apic.infraNodeP.get(name)
+            self.vlan_ns = self.apic.fvnsVlanInstP.get(*ns_args)
+        return self.vlan_ns
 
     def ensure_tenant_created_on_apic(self, tenant_id):
         """Make sure a tenant exists on the APIC.
@@ -324,6 +320,7 @@ class APICManager(object):
         epg = NetworkEPG(network_id=network_id, epg_id=epg_uid, segmentation_id='1')
         session.add(epg)
         session.flush()
+        return epg
 
     def delete_epg_for_network(self, tenant_id, network_id):
         # Check if an EPG is already present for this network

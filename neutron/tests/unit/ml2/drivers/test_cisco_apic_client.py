@@ -15,6 +15,7 @@
 # @author: Henry Gessau, Cisco Systems
 
 import mock
+import requests
 from webob import exc as wexc
 
 from neutron.common import log
@@ -31,24 +32,29 @@ class TestCiscoApicClient(base.BaseTestCase, mocked.ControllerMixin):
 
     def setUp(self):
         super(TestCiscoApicClient, self).setUp()
-        self._set_up_mocks()
+        self.set_up_mocks()
         self.apic = apic.RestClient(mocked.APIC_HOST)
         self.addCleanup(mock.patch.stopall)
 
-    def _mock_authenticate(self, token=None, timeout=None):
-        if token is None:
-            token = 'good'
+    def _mock_authenticate(self, timeout=None):
         if timeout is None:
             timeout = 300
-        self._mock_ok_response('aaaLogin', userName=mocked.APIC_USR,
-                               token=token, refreshTimeoutSeconds=timeout)
+        self.reset_reponses()
+        self.mock_ok_post_response('aaaLogin', userName=mocked.APIC_USR,
+                                   token='X', refreshTimeoutSeconds=timeout)
         self.apic.login(mocked.APIC_USR, mocked.APIC_PWD)
-        self.apic.authentication = 'logged in'
+
+    def test_login_by_instantiation(self):
+        self.reset_reponses()
+        self.mock_ok_post_response('aaaLogin', userName=mocked.APIC_USR,
+                                   token='X', refreshTimeoutSeconds='300')
+        apic2 = apic.RestClient(mocked.APIC_HOST,
+                                usr=mocked.APIC_USR, pwd=mocked.APIC_PWD)
+        self.assertIsNotNone(apic2.authentication)
+        self.assertEqual(apic2.username, mocked.APIC_USR)
 
     def test_client_session_login_ok(self):
         self._mock_authenticate()
-        self.apic = apic.RestClient(mocked.APIC_HOST, mocked.APIC_PORT,
-                                    mocked.APIC_USR, mocked.APIC_PWD)
         self.assertEqual(
             self.apic.authentication['userName'], mocked.APIC_USR)
         self.assertTrue(self.apic.api_base.startswith('http://'))
@@ -59,14 +65,14 @@ class TestCiscoApicClient(base.BaseTestCase, mocked.ControllerMixin):
         self.assertTrue(self.apic.api_base.startswith('https://'))
 
     def test_client_session_login_fail(self):
-        self._mock_error_response(wexc.HTTPError.code,
-                                  err_code='599',
-                                  err_text=u'Fake error')
+        self.mock_error_post_response(wexc.HTTPError.code,
+                                      code='599',
+                                      text=u'Fake error')
         self.assertRaises(cexc.ApicResponseNotOk, self.apic.login,
                           mocked.APIC_USR, mocked.APIC_PWD)
 
     def test_client_session_logout_ok(self):
-        self._mock_ok_response('aaaLogout', userName=mocked.APIC_USR)
+        self.mock_ok_post_response('aaaLogout', userName=mocked.APIC_USR)
         self.apic.logout()
         self.assertIsNone(self.apic.authentication)
         # Multiple signouts should not cause an error
@@ -75,7 +81,7 @@ class TestCiscoApicClient(base.BaseTestCase, mocked.ControllerMixin):
 
     def test_client_session_logout_fail(self):
         self._mock_authenticate()
-        self._mock_ok_response('aaaLogout', status='fail')
+        self.mock_ok_post_response('aaaLogout', status='fail')
         self.apic.logout()
         self.assertIsNone(self.apic.authentication)
 
@@ -86,20 +92,19 @@ class TestCiscoApicClient(base.BaseTestCase, mocked.ControllerMixin):
 
     def test_query_no_response(self):
         self._mock_authenticate()
-        self.mocked_get.return_value = None
+        requests.Session.get = mock.Mock(return_value=None)
         self.assertRaises(cexc.ApicHostNoResponse,
                           self.apic.fvTenant.get, mocked.APIC_TENANT)
 
     def test_query_error_response_no_data(self):
         self._mock_authenticate()
-        self._mock_error_response(wexc.HTTPError.code)
-        del self.mocked_response[:]
+        self.mock_error_get_response(wexc.HTTPError.code)  # No error attrs.
         self.assertRaises(cexc.ApicResponseNotOk,
                           self.apic.fvTenant.get, mocked.APIC_TENANT)
 
     def test_generic_get_data(self):
         self._mock_authenticate()
-        self._mock_ok_response('topSystem', name='ifc1')
+        self.mock_ok_get_response('topSystem', name='ifc1')
         top_system = self.apic.get_data('class/topSystem')
         self.assertIsNotNone(top_system)
         name = top_system[0]['topSystem']['attributes']['name']
@@ -107,47 +112,57 @@ class TestCiscoApicClient(base.BaseTestCase, mocked.ControllerMixin):
 
     def test_session_timeout_refresh_ok(self):
         self._mock_authenticate(timeout=-1)
-        self._mock_ok_response('aaaRefresh', token='ok',
-                               refreshTimeoutSeconds=300)
-        self.assertIsNone(self.apic.fvTenant.get('nobody'))
+        # Client will do refresh before getting tenant
+        self.mock_ok_get_response('aaaRefresh', token='ok',
+                                  refreshTimeoutSeconds=300)
+        self.mock_ok_get_response('fvTenant', name=mocked.APIC_TENANT)
+        tenant = self.apic.fvTenant.get(mocked.APIC_TENANT)
+        self.assertEqual(tenant['name'], mocked.APIC_TENANT)
 
     def test_session_timeout_refresh_error(self):
         self._mock_authenticate(timeout=-1)
-        self._mock_error_response(wexc.HTTPRequestTimeout)
+        self.mock_error_get_response(wexc.HTTPRequestTimeout,
+                                     code='503', text=u'timed out')
         self.assertRaises(cexc.ApicResponseNotOk,
                           self.apic.fvTenant.get, mocked.APIC_TENANT)
 
     def test_session_timeout_refresh_timeout_error(self):
         self._mock_authenticate(timeout=-1)
-        self._mock_error_response(wexc.HTTPBadRequest,
-                                  err_code='403',
-                                  err_text=u'Token was invalid. Expired.')
-        self.assertRaises(cexc.ApicResponseNotOk,
-                          self.apic.fvTenant.get, mocked.APIC_TENANT)
+        # Client will try to get refresh, we fake a refresh error.
+        self.mock_error_get_response(wexc.HTTPBadRequest,
+                                     code='403',
+                                     text=u'Token was invalid. Expired.')
+        # Client will then try to re-login.
+        self.mock_ok_post_response('aaaLogin', userName=mocked.APIC_USR,
+                                   token='ok', refreshTimeoutSeconds=300)
+        # Finally the client will try to get the tenant.
+        self.mock_ok_get_response('fvTenant', name=mocked.APIC_TENANT)
+        tenant = self.apic.fvTenant.get(mocked.APIC_TENANT)
+        self.assertEqual(tenant['name'], mocked.APIC_TENANT)
 
     def test_lookup_nonexistant_mo(self):
         self._mock_authenticate()
-        self.mock_get_response.json.return_value = {}
+        self.mock_ok_get_response('fvTenant')
         self.assertIsNone(self.apic.fvTenant.get(mocked.APIC_TENANT))
 
     def test_lookup_existing_mo(self):
         self._mock_authenticate()
-        self._mock_ok_response('fvTenant', name='infra')
+        self.mock_ok_get_response('fvTenant', name='infra')
         tenant = self.apic.fvTenant.get('infra')
         self.assertEqual(tenant['name'], 'infra')
 
     def test_list_mos_ok(self):
         self._mock_authenticate()
-        self._mock_ok_response('fvTenant', name='t1')
-        self._mock_response_append('fvTenant', name='t2')
+        self.mock_ok_get_response('fvTenant', name='t1')
+        self.mock_append_to_get('fvTenant', name='t2')
         tlist = self.apic.fvTenant.list_all()
         self.assertIsNotNone(tlist)
         self.assertEqual(len(tlist), 2)
 
     def test_list_mo_names_ok(self):
         self._mock_authenticate()
-        self._mock_ok_response('fvTenant', name='t1')
-        self._mock_response_append('fvTenant', name='t2')
+        self.mock_ok_get_response('fvTenant', name='t1')
+        self.mock_append_to_get('fvTenant', name='t2')
         tnlist = self.apic.fvTenant.list_names()
         self.assertIsNotNone(tnlist)
         self.assertEqual(len(tnlist), 2)
@@ -156,73 +171,75 @@ class TestCiscoApicClient(base.BaseTestCase, mocked.ControllerMixin):
 
     def test_list_mos_split_class_fail(self):
         self._mock_authenticate()
-        self._mock_ok_response('fvnsEncapBlk', name='Blk1')
+        self.mock_ok_get_response('fvnsEncapBlk', name='Blk1')
         encap_blks = self.apic.fvnsEncapBlk__vlan.list_all()
         self.assertEqual(len(encap_blks), 1)
 
     def test_delete_mo_ok(self):
         self._mock_authenticate()
-        self.assertFalse(self.apic.fvTenant.delete(mocked.APIC_TENANT))
-
-    def test_delete_mo_fail(self):
-        self._mock_authenticate()
-        self._mock_ok_response('fvTenant', status='fail')
+        self.mock_ok_post_response('fvTenant')
         self.assertFalse(self.apic.fvTenant.delete(mocked.APIC_TENANT))
 
     def test_create_mo_ok(self):
         self._mock_authenticate()
+        self.mock_ok_post_response('fvTenant', name=mocked.APIC_TENANT)
+        self.mock_ok_get_response('fvTenant', name=mocked.APIC_TENANT)
         self.apic.fvTenant.create(mocked.APIC_TENANT)
-        self._mock_ok_response('fvTenant', name=mocked.APIC_TENANT)
         tenant = self.apic.fvTenant.get(mocked.APIC_TENANT)
         self.assertEqual(tenant['name'], mocked.APIC_TENANT)
 
     def test_create_mo_already_exists(self):
         self._mock_authenticate()
-        self._mock_error_response(wexc.HTTPBadRequest,
-                                  err_code='103',
-                                  err_text=u'Fake 103 error')
+        self.mock_error_post_response(wexc.HTTPBadRequest,
+                                      code='103',
+                                      text=u'Fake 103 error')
         self.assertRaises(cexc.ApicResponseNotOk,
                           self.apic.vmmProvP.create, mocked.APIC_VMMP)
 
     def test_create_mo_with_prereq(self):
         self._mock_authenticate()
+        self.mock_ok_post_response('fvTenant', name=mocked.APIC_TENANT)
+        self.mock_ok_post_response('fvBD', name=mocked.APIC_NETWORK)
+        self.mock_ok_get_response('fvBD', name=mocked.APIC_NETWORK)
         bd_args = mocked.APIC_TENANT, mocked.APIC_NETWORK
         self.apic.fvBD.create(*bd_args)
-        self._mock_ok_response('fvBD', name=mocked.APIC_NETWORK)
         network = self.apic.fvBD.get(*bd_args)
         self.assertEqual(network['name'], mocked.APIC_NETWORK)
 
     def test_create_mo_prereq_exists(self):
         self._mock_authenticate()
+        self.mock_ok_post_response('vmmDomP', name=mocked.APIC_DOMAIN)
+        self.mock_ok_get_response('vmmDomP', name=mocked.APIC_DOMAIN)
         self.apic.vmmDomP.create(mocked.APIC_VMMP, mocked.APIC_DOMAIN)
-        self._mock_ok_response('vmmDomP', name=mocked.APIC_DOMAIN)
         dom = self.apic.vmmDomP.get(mocked.APIC_VMMP, mocked.APIC_DOMAIN)
         self.assertEqual(dom['name'], mocked.APIC_DOMAIN)
 
     def test_create_mo_fails(self):
         self._mock_authenticate()
+        self.mock_ok_post_response('fvTenant', name=mocked.APIC_TENANT)
+        self.mock_error_post_response(wexc.HTTPBadRequest,
+                                      code='not103',
+                                      text=u'Fake not103 error')
         bd_args = mocked.APIC_TENANT, mocked.APIC_NETWORK
-        self._mock_error_response(wexc.HTTPBadRequest,
-                                  err_code='not103',
-                                  err_text=u'Fake not103 error')
         self.assertRaises(cexc.ApicResponseNotOk,
                           self.apic.fvBD.create, *bd_args)
 
     def test_update_mo(self):
         self._mock_authenticate()
+        self.mock_ok_post_response('fvTenant', name=mocked.APIC_TENANT)
+        self.mock_ok_get_response('fvTenant', name=mocked.APIC_TENANT,
+                                  more='extra')
         self.apic.fvTenant.update(mocked.APIC_TENANT, more='extra')
-        self._mock_ok_response('fvTenant', name=mocked.APIC_TENANT,
-                               more='extra')
         tenant = self.apic.fvTenant.get(mocked.APIC_TENANT)
         self.assertEqual(tenant['name'], mocked.APIC_TENANT)
         self.assertEqual(tenant['more'], 'extra')
 
     def test_attr_fail_empty_list(self):
         self._mock_authenticate()
-        self._mock_ok_response(None)
+        self.mock_ok_get_response('fvTenant')  # No attrs for tenant.
         self.assertIsNone(self.apic.fvTenant.get(mocked.APIC_TENANT))
 
-    def test_attr_fail_empty_obj(self):
+    def test_attr_fail_other_obj(self):
         self._mock_authenticate()
-        self._mock_ok_response({})
+        self.mock_ok_get_response('other', name=mocked.APIC_TENANT)
         self.assertIsNone(self.apic.fvTenant.get(mocked.APIC_TENANT))
