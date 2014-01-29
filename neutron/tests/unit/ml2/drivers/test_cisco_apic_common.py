@@ -15,14 +15,18 @@
 # @author: Henry Gessau, Cisco Systems
 
 import mock
+import requests
 from webob import exc as wexc
 
 from oslo.config import cfg
 
 from neutron.common import config as neutron_config
 from neutron.plugins.ml2 import config as ml2_config
+from neutron.plugins.ml2.drivers.apic import apic_client as apic
 from neutron.tests.unit import test_api_v2
 
+
+OK = wexc.HTTPOk.code
 
 APIC_HOST = 'fake.controller.local'
 APIC_PORT = 7580
@@ -71,54 +75,68 @@ class ControllerMixin(object):
     """
 
     def __init__(self):
-        self.mocked_post = None
-        self.mocked_get = None
-        self.mock_post_response = None
-        self.mock_get_response = None
-        self.mocked_response = None
-        self.mocked_json_response = None
+        self.response = None
 
-    def _set_up_mocks(self):
-        # Mock the operations in requests
-        self.mocked_post = mock.patch('requests.Session.post',
-                                      autospec=True).start()
-        self.mocked_get = mock.patch('requests.Session.get',
-                                     autospec=True).start()
+    def set_up_mocks(self):
+        # The mocked responses from the server are lists used by
+        # mock.side_effect, which means each call to post or get will
+        # return the next item in the list. This allows the test cases
+        # to stage a sequence of responses to method(s) under test.
+        self.response = {'post': [], 'get': []}
+        self.reset_reponses()
 
-        # Mock responses from the server, for both post and get
-        self.mock_post_response = mock.MagicMock()
-        self.mocked_post.return_value = self.mock_post_response
-        self.mock_post_response.status_code = wexc.HTTPOk.code
-        self.mock_get_response = mock.MagicMock()
-        self.mocked_get.return_value = self.mock_get_response
-        self.mock_get_response.status_code = wexc.HTTPOk.code
+    def reset_reponses(self, req=None):
+        # Clear all staged responses.
+        reqs = req and [req] or ['post', 'get']  # Both if none specified.
+        for req in reqs:
+            del self.response[req][:]
+            self.restart_responses(req)
 
-        # The mocked response (can be updated by test-cases)
-        self.mocked_json_response = {'imdata': []}
-        self.mock_post_response.json.return_value = self.mocked_json_response
-        self.mock_get_response.json.return_value = self.mocked_json_response
-        self.mocked_response = self.mocked_json_response['imdata']
+    def restart_responses(self, req):
+        responses = mock.MagicMock(side_effect=self.response[req])
+        if req == 'post':
+            requests.Session.post = responses
+        elif req == 'get':
+            requests.Session.get = responses
 
-    def _mock_ok_response(self, mo, **attrs):
-        self.mock_get_response.status_code = wexc.HTTPOk.code
-        self.mock_post_response.status_code = wexc.HTTPOk.code
-        del self.mocked_response[:]
-        if attrs is None:
-            return
-        if not attrs:
-            self.mocked_response.append({})
-        else:
-            self.mocked_response.append({mo: {'attributes': attrs}})
+    def mock_ok_post_response(self, mo, **attrs):
+        self._stage_mocked_response('post', OK, mo, **attrs)
 
-    def _mock_response_append(self, mo, **attrs):
-        self.mocked_response.append({mo: {'attributes': attrs}})
+    def mock_ok_get_response(self, mo, **attrs):
+        self._stage_mocked_response('get', OK, mo, **attrs)
 
-    def _mock_error_response(self, status, err_code='', err_text=u''):
-        self.mock_get_response.status_code = status
-        self.mock_post_response.status_code = status
-        del self.mocked_response[:]
-        self.mocked_response.append(
-            {'error': {'attributes': {'code': err_code, 'text': err_text}}})
+    def mock_append_to_get(self, mo, **attrs):
+        # Append a MO to the last get response.
+        mo_attrs = attrs and {mo: {'attributes': attrs}} or {}
+        self.response['get'][-1].json.return_value['imdata'].append(mo_attrs)
+
+    def mock_error_post_response(self, status, **attrs):
+        self._stage_mocked_response('post', status, 'error', **attrs)
+
+    def mock_error_get_response(self, status, **attrs):
+        self._stage_mocked_response('get', status, 'error', **attrs)
+
+    def _stage_mocked_response(self, req, mock_status, mo, **attrs):
+        response = mock.MagicMock()
+        response.status_code = mock_status
+        mo_attrs = attrs and [{mo: {'attributes': attrs}}] or []
+        response.json.return_value = {'imdata': mo_attrs}
+        self.response[req].append(response)
+
+    def mock_responses_for_create(self, obj):
+        self._mock_container_responses_for_create(apic.MoClass(obj).container)
+        name = '-'.join([obj, 'name'])
+        self._stage_mocked_response('post', OK, obj, name=name)
+
+    def _mock_container_responses_for_create(self, obj):
+        # Recursively generate responses for creating obj's containers.
+        if obj:
+            mo = apic.MoClass(obj)
+            if mo.container:
+                self._mock_container_responses_for_create(mo.container)
+            if mo.can_create:
+                name = '-'.join([obj, 'name'])  # useful for debugging
+                self._stage_mocked_response('post', OK, obj, name=name)
 
 
 class ConfigMixin(object):
@@ -163,8 +181,8 @@ class ConfigMixin(object):
         self.addCleanup(cfg.CONF.reset)
 
         apic_switch_cfg = {
-            'switch:east01': {'ubuntu1,ubuntu2': [11]},
-            'switch:east02': {'rhel01,rhel02': [21]},
+            'switch:east01': {'ubuntu1,ubuntu2': ['3/11']},
+            'switch:east02': {'rhel01,rhel02': ['4/21']},
         }
         self.mocked_parser = mock.patch.object(cfg,
                                                'MultiConfigParser').start()
