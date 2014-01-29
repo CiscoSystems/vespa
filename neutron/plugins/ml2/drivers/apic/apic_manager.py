@@ -192,7 +192,6 @@ class APICManager(object):
             self.function_profile = self.apic.infraAccPortGrp.get(name)
             
     def ensure_node_profile_created_for_switch(self, switch_id):
-        self.apic.infraNodeP.delete(switch_id)
         sobj = self.apic.infraNodeP.get(switch_id)
         if not sobj:
             # Create Node profile
