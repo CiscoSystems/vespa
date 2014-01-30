@@ -67,7 +67,9 @@ supported_mos = {
     'vzRsFiltAtt': MoPath('vzSubj', 'rsfiltAtt-%s'),
     'vzEntry': MoPath('vzFilter', 'e-%s'),
     'vzInTerm': MoPath('vzSubj', 'intmnl'),
+    'vzRsFiltAtt__In': MoPath('vzInTerm', 'rsfiltAtt-%s'),
     'vzOutTerm': MoPath('vzSubj', 'outtmnl'),
+    'vzRsFiltAtt__Out': MoPath('vzOutTerm', 'rsfiltAtt-%s'),
     'vzCPIf': MoPath('fvTenant', 'cif-%s'),
     'vzRsIf': MoPath('vzCPIf', 'rsif'),
 
