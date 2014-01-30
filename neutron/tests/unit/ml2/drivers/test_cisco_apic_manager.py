@@ -1,16 +1,17 @@
 # Copyright (c) 2014 Cisco Systems
+# All Rights Reserved.
 #
-# Licensed under the Apache License, Version 2.0 (the "License"); you may
-# not use this file except in compliance with the License. You may obtain
-# a copy of the License at
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#         http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-# License for the specific language governing permissions and limitations
-# under the License.
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
 #
 # @author: Henry Gessau, Cisco Systems
 
@@ -69,7 +70,7 @@ class TestCiscoApicManager(base.BaseTestCase,
     def test_to_range(self):
         port_list = [4, 2, 3, 1, 7, 8, 10, 20, 6, 22, 21]
         expected_ranges = [(1, 4), (6, 8), (10, 10), (20, 22)]
-        port_ranges = [r for r in self.mgr._to_range(port_list)]
+        port_ranges = [r for r in apic_manager.group_by_ranges(port_list)]
         self.assertEqual(port_ranges, expected_ranges)
 
     def test_get_profiles(self):
@@ -165,34 +166,35 @@ class TestCiscoApicManager(base.BaseTestCase,
         self.mgr.ensure_infra_created_on_apic()
 
     def test_ensure_infra_created_seq1(self):
-        self.mgr.ensure_node_profile_created_for_switch = mock.Mock()  # 119
+        self.mgr.ensure_node_profile_created_for_switch = mock.Mock()
         self.mgr.get_port_profile_for_node = mock.Mock(
-            return_value=None)                                         # 123
+            return_value=None)
         self.mgr.ensure_port_profile_created_on_apic = mock.Mock(
-            return_value={'dn': 'port_profile_dn'})                    # 127
+            return_value={'dn': 'port_profile_dn'})
 
         def _profile_for_module(switch, ppn, module):
             profile = mock.MagicMock()
+            profile.ppn = ppn
             profile.hpselc_id = '-'.join([switch, module, 'hpselc_id'])
             return profile
 
         self.mgr.get_profile_for_module = mock.MagicMock(
-            side_effect=_profile_for_module)                      # 146, 155
+            side_effect=_profile_for_module)
         self.mgr.get_profile_for_module_and_ports = mock.Mock(
-            return_value=None)                                         # 161
-        self.mgr.add_profile_for_module_and_ports = mock.Mock()        # 171
+            return_value=None)
+        self.mgr.add_profile_for_module_and_ports = mock.Mock()
 
         num_switches = len(self.mgr.switch_dict)
         for loop in range(num_switches):
-            self.mock_responses_for_create('infraRsAccPortP')          # 130
-            self.mock_responses_for_create('infraPortBlk')             # 165
+            self.mock_responses_for_create('infraRsAccPortP')
+            self.mock_responses_for_create('infraPortBlk')
 
         self.mgr.ensure_infra_created_on_apic()
         # Just coverage, nothing to verify.
         # TODO(Henry): verify something
 
     def test_ensure_infra_created_seq2(self):
-        self.mgr.ensure_node_profile_created_for_switch = mock.Mock()  # 119
+        self.mgr.ensure_node_profile_created_for_switch = mock.Mock()
 
         def _profile_for_node(switch):
             profile = mock.MagicMock()
@@ -200,18 +202,18 @@ class TestCiscoApicManager(base.BaseTestCase,
             return profile
 
         self.mgr.get_port_profile_for_node = mock.MagicMock(
-            side_effect=_profile_for_node)                        # 123, 132
+            side_effect=_profile_for_node)
         self.mgr.get_profile_for_module = mock.Mock(
-            return_value=None)                                         # 146
-        self.mgr.function_profile = {'dn': 'dn'}                       # 151
+            return_value=None)
+        self.mgr.function_profile = {'dn': 'dn'}
         self.mgr.get_profile_for_module_and_ports = mock.Mock(
-            return_value=True)                                         # 161
+            return_value=True)
 
         num_switches = len(self.mgr.switch_dict)
         for loop in range(num_switches):
-            self.mock_responses_for_create('infraRsAccPortP')          # 130
-            self.mock_responses_for_create('infraHPortS')              # 149
-            self.mock_responses_for_create('infraRsAccBaseGrp')        # 152
+            self.mock_responses_for_create('infraRsAccPortP')
+            self.mock_responses_for_create('infraHPortS')
+            self.mock_responses_for_create('infraRsAccBaseGrp')
 
         self.mgr.ensure_infra_created_on_apic()
         # Just coverage, nothing to verify.

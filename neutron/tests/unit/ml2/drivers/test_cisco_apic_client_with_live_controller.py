@@ -16,7 +16,6 @@
 #   \_/ |_| |_|_|___/  \__\___/  \_| \_/\___|\__,_|\__|_|  \___/|_| |_(_)
 #
 
-import sys
 import time
 
 from neutron.common import log

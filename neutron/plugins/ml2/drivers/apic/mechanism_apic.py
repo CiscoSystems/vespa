@@ -1,4 +1,4 @@
-# Copyright (c) 2013 Cisco Systems Inc.
+# Copyright (c) 2014 Cisco Systems Inc.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -14,18 +14,15 @@
 #    under the License.
 #
 # @author: Arvind Somya (asomya@cisco.com), Cisco Systems Inc.
+
 import re
 
 from oslo.config import cfg
 
-from neutron.db import api as db_api
-from neutron.db import model_base
 from neutron.extensions import portbindings
-from neutron.plugins.common import constants
 from neutron.openstack.common import log
+from neutron.plugins.common import constants
 from neutron.plugins.ml2 import driver_api as api
-from neutron.plugins.ml2.drivers.apic import apic_client
-from neutron.plugins.ml2.drivers.apic import config
 from neutron.plugins.ml2.drivers.apic.apic_manager import APICManager
 
 
@@ -42,7 +39,8 @@ class APICMechanismDriver(api.MechanismDriver):
         # Get vlan ns name
         ns_name = cfg.CONF.ml2_apic.apic_vlan_ns_name
         # Grab vlan ranges
-        (vlan_min, vlan_max) = cfg.CONF.ml2_type_vlan.network_vlan_ranges[0].split(':')[-2:]
+        vlan_ranges = cfg.CONF.ml2_type_vlan.network_vlan_ranges[0]
+        (vlan_min, vlan_max) = vlan_ranges.split(':')[-2:]
         # Create VLAN namespace
         vlan_ns = self.apic_manager.ensure_vlan_ns_created_on_apic(ns_name,
                                                                    vlan_min,
@@ -50,11 +48,11 @@ class APICMechanismDriver(api.MechanismDriver):
         vmm_name = cfg.CONF.ml2_apic.apic_vmm_domain
         # Create VMM domain
         self.apic_manager.ensure_vmm_domain_created_on_apic(vmm_name, vlan_ns)
-        
+
         # Create entity profile
         ent_name = cfg.CONF.ml2_apic.apic_entity_profile
         self.apic_manager.ensure_entity_profile_created_on_apic(ent_name)
-        
+
         # Create function profile
         func_name = cfg.CONF.ml2_apic.apic_function_profile
         self.apic_manager.ensure_function_profile_created_on_apic(func_name)
@@ -75,21 +73,19 @@ class APICMechanismDriver(api.MechanismDriver):
         # Get host binding if any
         host = context.current['binding:host_id']
 
-        # Get port mac
-        mac = context.current['mac_address']
-        
         # Check if port is bound to a host
         if not host:
             # Not a VM port, return for now
             return
 
         # Create a static path attachment for this host/epg/switchport combo
-        self.apic_manager.ensure_path_created_for_port(tenant_id, network, host, seg)
+        self.apic_manager.ensure_path_created_for_port(tenant_id, network,
+                                                       host, seg)
 
     def create_network_precommit(self, context):
         net_id = context.current['id']
         tenant_id = context.current['tenant_id']
-        
+
         self.apic_manager.ensure_bd_created_on_apic(tenant_id, net_id)
         # Create EPG for this network
         self.apic_manager.ensure_epg_created_for_network(tenant_id, net_id)
@@ -110,7 +106,7 @@ class APICMechanismDriver(api.MechanismDriver):
         subnet_id = context.current['id']
         gateway_ip = context.current['gateway_ip']
         cidr = context.current['cidr']
-        netmask = re.sub(r"^.+\/",'', cidr)
+        netmask = re.sub(r'^.+/', '', cidr)
         gateway_ip = gateway_ip + '/' + netmask
 
         self.apic_manager.ensure_subnet_created_on_apic(tenant_id, network_id,
@@ -119,7 +115,7 @@ class APICMechanismDriver(api.MechanismDriver):
     def bind_port(self, context):
         LOG.debug(_("Attempting to bind port %(port)s on "
                     "network %(network)s"),
-                   {'port': context.current['id'],
+                  {'port': context.current['id'],
                    'network': context.network.current['id']})
         for segment in context.network.network_segments:
             if self.check_segment(segment):
@@ -137,7 +133,8 @@ class APICMechanismDriver(api.MechanismDriver):
                            'physnet': segment[api.PHYSICAL_NETWORK],
                            'nettype': segment[api.NETWORK_TYPE]})
 
-    def check_segment(self, segment):
+    @staticmethod
+    def check_segment(segment):
         """Verify a segment is valid for the OpenDaylight MechanismDriver
 
         Verify the requested segment is supported by ODL and return True or

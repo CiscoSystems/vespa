@@ -1,4 +1,4 @@
-# Copyright (c) 2013 OpenStack Foundation
+# Copyright (c) 2014 OpenStack Foundation
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -12,6 +12,8 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+#
+# @author: Arvind Somya (asomya@cisco.com), Cisco Systems Inc.
 
 from oslo.config import cfg
 
@@ -64,7 +66,8 @@ class ML2MechApicConfig(object):
                     switch, switch_id = parsed_item.split(':')
                     if switch.lower() == 'switch':
                         self.switch_dict[switch_id] = {}
-                        for host_list,port in parsed_file[parsed_item].items():
+                        port_cfg = parsed_file[parsed_item].items()
+                        for host_list, port in port_cfg:
                             hosts = host_list.split(',')
                             port = port[0]
                             self.switch_dict[switch_id][port] = hosts
