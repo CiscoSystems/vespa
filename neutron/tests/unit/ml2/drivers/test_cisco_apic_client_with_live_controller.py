@@ -49,7 +49,7 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
     """
     def setUp(self):
         super(TestCiscoApicClientLiveController, self).setUp()
-        self.apic = apic.RestClient(APIC2_HOST,
+        self.apic = apic.RestClient(APIC4_HOST,
                                     usr=APIC_ADMIN, pwd=APIC_PWD)
         self.addCleanup(self.sign_out)
 
@@ -427,3 +427,106 @@ class TestCiscoApicClientLiveController(base.BaseTestCase):
         #self.assertTrue(eppd)
         #eppd_dn = eppd['dn']
         #print eppd_dn
+
+    def clean_up_contracts_filters_subjects_etc(self):
+        t = test.APIC_TENANT
+        c = test.APIC_CONTRACT
+        f = test.APIC_FILTER
+        e = test.APIC_ENTRY
+        s = test.APIC_SUBJECT
+        fa_in = test.APIC_FILTER + '_in'
+        fa_out = test.APIC_FILTER + '_out'
+        self.apic.vzRsFiltAtt__Out.delete(t, c, s, fa_out)
+        self.apic.vzOutTerm.delete(t, c, s)
+        self.apic.vzRsFiltAtt__In.delete(t, c, s, fa_in)
+        self.apic.vzInTerm.delete(t, c, s)
+        self.apic.vzSubj.delete(t, c, s)
+        self.apic.vzBrCP.delete(t, c)
+        self.apic.vzEntry.delete(t, f, e)
+        self.apic.vzFilter.delete(t, f)
+        self.apic.fvTenant.delete(t)
+
+    def test_contracts_filters_subjects_in_out(self):
+        self.clean_up_contracts_filters_subjects_etc()
+        self.addCleanup(self.clean_up_contracts_filters_subjects_etc)
+
+        tenant = test.APIC_TENANT
+        self.apic.fvTenant.create(tenant)
+        new_tenant = self.apic.fvTenant.get(tenant)
+        self.assertEqual(new_tenant['name'], tenant)
+        LOG.debug(new_tenant['dn'])
+
+        filter_x = test.APIC_FILTER
+        self.apic.vzFilter.create(tenant, filter_x)
+        new_filter_x = self.apic.vzFilter.get(tenant, filter_x)
+        self.assertEqual(new_filter_x['name'], filter_x)
+        LOG.debug(new_filter_x['dn'])
+
+        entry = test.APIC_ENTRY
+        self.apic.vzEntry.create(tenant, filter_x, entry,
+                                 prot='6', dFromPort='10', dToPort='10')
+        new_entry = self.apic.vzEntry.get(tenant, filter_x, entry)
+        self.assertEqual(new_entry['name'], entry)
+        LOG.debug(new_entry['dn'])
+
+        contract = test.APIC_CONTRACT
+        self.apic.vzBrCP.create(tenant, contract, scope='tenant')
+        new_contract = self.apic.vzBrCP.get(tenant, contract)
+        self.assertEqual(new_contract['name'], contract)
+        LOG.debug(new_contract['dn'])
+
+        subject = test.APIC_SUBJECT
+        self.apic.vzSubj.create(tenant, contract, subject)
+        new_subject = self.apic.vzSubj.get(tenant, contract, subject)
+        self.assertEqual(new_subject['name'], subject)
+        LOG.debug(new_subject['dn'])
+
+        self.apic.vzInTerm.create(tenant, contract, subject)
+        interm = self.apic.vzInTerm.get(tenant, contract, subject)
+        LOG.debug(interm['dn'])
+
+        fatt_in = test.APIC_FILTER + '_in'
+        self.apic.vzRsFiltAtt__In.create(tenant, contract, subject, filter_x)
+        new_fatt_in = self.apic.vzRsFiltAtt__In.get(tenant, contract,
+                                                    subject, filter_x)
+        LOG.debug(new_fatt_in['dn'])
+
+        self.apic.vzOutTerm.create(tenant, contract, subject)
+        outterm = self.apic.vzOutTerm.get(tenant, contract, subject)
+        LOG.debug(outterm['dn'])
+
+        fatt_out = test.APIC_FILTER + '_out'
+        self.apic.vzRsFiltAtt__Out.create(tenant, contract, subject, filter_x)
+        new_fatt_out = self.apic.vzRsFiltAtt__Out.get(tenant, contract,
+                                                      subject, filter_x)
+        LOG.debug(new_fatt_out['dn'])
+
+    def test_contracts_filters_subjects_in_out_summary(self):
+        self.clean_up_contracts_filters_subjects_etc()
+        self.addCleanup(self.clean_up_contracts_filters_subjects_etc)
+
+        tenant = test.APIC_TENANT
+        filter_x = test.APIC_FILTER
+        entry = test.APIC_ENTRY
+        contract = test.APIC_CONTRACT
+        subject = test.APIC_SUBJECT
+
+        # tenant
+        self.apic.fvTenant.create(tenant)
+        # filter
+        self.apic.vzFilter.create(tenant, filter_x)
+        # entry
+        self.apic.vzEntry.create(tenant, filter_x, entry,
+                                 prot='6', dFromPort='10', dToPort='10')
+        # contract
+        self.apic.vzBrCP.create(tenant, contract)
+        # subject
+        self.apic.vzSubj.create(tenant, contract, subject)
+        # input terminal
+        self.apic.vzInTerm.create(tenant, contract, subject)
+        # associate filer with input terminal
+        self.apic.vzRsFiltAtt__In.create(tenant, contract, subject, filter_x)
+        # output terminal
+        self.apic.vzOutTerm.create(tenant, contract, subject)
+        # associate filter with output terminal
+        self.apic.vzRsFiltAtt__Out.create(tenant, contract, subject, filter_x)

@@ -193,7 +193,9 @@ def requestdata(request_func):
             request = url
         else:
             request = '%s, data=%s' % (url, data)
+            LOG.debug("data = %s", data)
         imdata = unicode2str(response.json()).get('imdata')
+        LOG.debug("Response: %s", imdata)
         if response.status_code != wexc.HTTPOk.code:
             try:
                 err_code = imdata[0]['error']['attributes']['code']
@@ -371,7 +373,7 @@ class MoManager(object):
 
     def create(self, *params, **attrs):
         self._create_container(*params)
-        if self.mo.can_create:
+        if self.mo.can_create and 'status' not in attrs:
             attrs['status'] = 'created'
         return self.session.post_mo(self.mo, *params, **attrs)
 
