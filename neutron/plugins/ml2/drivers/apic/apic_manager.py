@@ -28,6 +28,8 @@ from neutron.plugins.ml2.drivers.apic import config
 
 AP_NAME = 'openstack'
 VMM_DOMAIN = 'openstack'
+PROVIDER_NAME = 'openstack_provider'
+CONSUMER_NAME = 'openstack_consumer'
 
 
 def group_by_ranges(i):
@@ -47,6 +49,7 @@ class NetworkEPG(model_base.BASEV2):
                            primary_key=True)
     epg_id = sa.Column(sa.String(64), nullable=False)
     segmentation_id = sa.Column(sa.String(64), nullable=False)
+    provider = sa.Column(sa.Boolean, default=False)
 
 
 class PortProfile(model_base.BASEV2):
@@ -60,6 +63,14 @@ class PortProfile(model_base.BASEV2):
     module = sa.Column(sa.String(10), nullable=False)
     from_port = sa.Column(sa.Integer(10), nullable=False)
     to_port = sa.Column(sa.Integer(10), nullable=False)
+
+
+class TenantContract(model_base.BASEV2):
+    __tablename__ = 'ml2_apic_contracts'
+
+    tenant_id = sa.Column(sa.String(64), nullable=False, primary_key=True)
+    contract_id = sa.Column(sa.String(64), nullable=False)
+    filter_id = sa.Column(sa.String(64), nullable=False)
 
 
 class APICManager(object):
@@ -126,8 +137,9 @@ class APICManager(object):
             self.ensure_node_profile_created_for_switch(switch)
 
             # Check if a port profile exists for this node
-            ppname = self.get_port_profile_for_node(switch)
-            if not ppname:
+            sprofile = self.get_port_profile_for_node(switch)
+            ppname = None
+            if not sprofile:
                 # Generate uuid for port profile name
                 ppname = uuid.uuid4()
                 # Create port profile for this switch
@@ -135,6 +147,8 @@ class APICManager(object):
                 # Add port profile to node profile
                 ppdn = pprofile['dn']
                 self.apic.infraRsAccPortP.create(switch, ppdn)
+            else:
+                ppname = sprofile.profile_id
 
             # Gather port ranges for this switch
             ports = self.switch_dict[switch].keys()
@@ -356,6 +370,109 @@ class APICManager(object):
         # Remove DB row
         session.delete(epg)
         session.flush()
+
+    def get_provider_contract(self):
+        session = db_api.get_session()
+        epg = session.query(NetworkEPG).filter_by(
+            provider=True).first()
+        if epg:
+            return True
+
+        return False
+
+    def set_provider_contract(self, epg_id):
+        session = db_api.get_session()
+        epg = session.query(NetworkEPG).filter_by(
+            epg_id=epg_id).first()
+        if epg:
+            epg.provider = True
+            session.merge(epg)
+            session.flush()
+            return epg
+
+        return False
+
+    def unset_provider_contract(self, epg_id):
+        session = db_api.get_session()
+        epg = session.query(NetworkEPG).filter_by(
+            epg_id=epg_id).first()
+        if epg:
+            epg.provider = False
+            session.merge(epg)
+            session.flush()
+            return epg
+
+        return False
+
+    def get_an_epg(self, exception):
+        session = db_api.get_session()
+        epg = session.query(NetworkEPG).filter(
+            NetworkEPG.epg_id != exception).first()
+        if epg:
+            return epg
+
+    def create_tenant_filter(self, tenant_id):
+        fuuid = uuid.uuid4()
+        # Create a new tenant filter
+        self.apic.vzFilter.create(tenant_id, fuuid)
+        # Create a new entry
+        euuid = uuid.uuid4()
+        self.apic.vzEntry.create(tenant_id, fuuid, euuid)
+
+        return fuuid
+
+    def set_contract_for_epg(self, tenant_id, epg_id,
+                             contract_id, provider=False):
+        if provider:
+            self.apic.fvRsProv.create(tenant_id, AP_NAME, epg_id, contract_id)
+            self.set_provider_contract(epg_id)
+        else:
+            self.apic.fvRsCons.create(tenant_id, AP_NAME, epg_id, contract_id)
+
+    def delete_contract_for_epg(self, tenant_id, epg_id,
+                                contract_id, provider=False):
+        if provider:
+            self.apic.fvRsProv.delete(tenant_id, AP_NAME, epg_id, contract_id)
+            self.unset_provider_contract(epg_id)
+            # Pick out another EPG to set as contract provider
+            epg = self.get_an_epg(epg_id)
+            self.update_contract_for_epg(tenant_id, epg.epg_id,
+                                         contract_id, True)
+        else:
+            self.apic.fvRsCons.delete(tenant_id, AP_NAME, epg_id, contract_id)
+
+    def update_contract_for_epg(self, tenant_id, epg_id,
+                                contract_id, provider=False):
+        self.apic.fvRsCons.delete(tenant_id, AP_NAME, epg_id, contract_id)
+        self.set_contract_for_epg(tenant_id, epg_id, contract_id, provider)
+
+    def create_tenant_contract(self, tenant_id):
+        session = db_api.get_session()
+        contract = session.query(TenantContract).filter_by(
+            tenant_id=tenant_id).first()
+        if not contract:
+            cuuid = uuid.uuid4()
+            # Create contract
+            contract = self.apic.vzBrCP.create(tenant_id, cuuid,
+                                               scope='tenant')
+            # Create subject
+            suuid = uuid.uuid4()
+            self.apic.vzSubj.create(tenant_id, cuuid, suuid)
+            # Create filter and entry
+            tfilter = self.create_tenant_filter(tenant_id)
+            # Create interm and outterm
+            self.apic.vzInTerm.create(tenant_id, cuuid, suuid)
+            self.apic.vzRsFiltAtt__In.create(tenant_id, cuuid, suuid, tfilter)
+            self.apic.vzOutTerm.create(tenant_id, cuuid, suuid)
+            self.apic.vzRsFiltAtt__Out.create(tenant_id, cuuid, suuid, tfilter)
+            # Store contract in DB
+            contract = TenantContract(tenant_id=tenant_id,
+                                      contract_id=cuuid,
+                                      filter_id=tfilter)
+            session.add(contract)
+            session.flush()
+
+        return contract
 
     def _get_switch_and_port_for_host(self, host_id):
         for switch in self.switch_dict.keys():
