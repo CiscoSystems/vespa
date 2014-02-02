@@ -72,7 +72,7 @@ APIC_VLAN_TO = 'vlan-%d' % APIC_VLANID_TO
 
 class ControllerMixin(object):
     """
-    Mock the controller for APIC driver unit tests.
+    Mock the controller for APIC driver and service unit tests.
     """
 
     def __init__(self):
@@ -100,13 +100,13 @@ class ControllerMixin(object):
         elif req == 'get':
             requests.Session.get = responses
 
-    def mock_ok_post_response(self, mo, **attrs):
+    def mock_response_for_post(self, mo, **attrs):
         self._stage_mocked_response('post', OK, mo, **attrs)
 
-    def mock_ok_get_response(self, mo, **attrs):
+    def mock_response_for_get(self, mo, **attrs):
         self._stage_mocked_response('get', OK, mo, **attrs)
 
-    def mock_append_to_get(self, mo, **attrs):
+    def mock_append_to_response(self, mo, **attrs):
         # Append a MO to the last get response.
         mo_attrs = attrs and {mo: {'attributes': attrs}} or {}
         self.response['get'][-1].json.return_value['imdata'].append(mo_attrs)
@@ -126,7 +126,7 @@ class ControllerMixin(object):
 
     def mock_responses_for_create(self, obj):
         self._mock_container_responses_for_create(apic.MoClass(obj).container)
-        name = '-'.join([obj, 'name'])
+        name = '-'.join([obj, 'name'])  # useful for debugging
         self._stage_mocked_response('post', OK, obj, name=name)
 
     def _mock_container_responses_for_create(self, obj):
@@ -142,14 +142,13 @@ class ControllerMixin(object):
 
 class ConfigMixin(object):
     """
-    Mock the config for APIC driver unit tests.
+    Mock the config for APIC driver and service unit tests.
     """
 
     def __init__(self):
         self.mocked_parser = None
 
-    def _set_up_mocks(self):
-
+    def set_up_mocks(self):
         # Mock the configuration file
         args = ['--config-file', test_api_v2.etcdir('neutron.conf.test')]
         neutron_config.parse(args=args)
@@ -189,3 +188,23 @@ class ConfigMixin(object):
                                                'MultiConfigParser').start()
         self.mocked_parser.return_value.read.return_value = [apic_switch_cfg]
         self.mocked_parser.return_value.parsed = [apic_switch_cfg]
+
+
+class DbModelMixin(object):
+    """
+    Mock the DB models for the APIC driver and service unit tests.
+    """
+
+    def __init__(self):
+        self.mocked_session = None
+
+    def set_up_mocks(self):
+        self.mocked_session = mock.MagicMock()
+        get_session = mock.patch('neutron.db.api.get_session').start()
+        get_session.return_value = self.mocked_session
+
+    def mock_db_query_filterby_first_return(self, value):
+        """Mock db.session.query().filterby().first() to return value."""
+        query = self.mocked_session.query.return_value
+        query.filter_by.return_value.first.return_value = value
+

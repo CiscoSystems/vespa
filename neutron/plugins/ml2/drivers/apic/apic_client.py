@@ -179,6 +179,7 @@ def requestdata(request_func):
         If the session has timed out, refresh it.
     After:
         Verify we got a response and it is HTTP OK.
+        Reset the session timeout deadline.
         Extract the data from the response and return it.
     """
     def wrapper(self, *args, **kwargs):
@@ -189,6 +190,7 @@ def requestdata(request_func):
         url, data, response = request_func(self, *args, **kwargs)
         if response is None:
             raise cexc.ApicHostNoResponse(url=url)
+        self.session_deadline = time.time() + self.session_timeout
         if data is None:
             request = url
         else:
@@ -226,6 +228,7 @@ class ApicSession(object):
         self.api_base = '%s://%s:%s/api' % (protocol, host, port)
         self.session = requests.Session()
         self.session_deadline = 0
+        self.session_timeout = 0
         self.cookie = {}
 
         # Log in
@@ -298,7 +301,9 @@ class ApicSession(object):
             self.cookie = {'APIC-Cookie': attributes['token']}
             timeout = int(attributes['refreshTimeoutSeconds'])
             LOG.debug(_("APIC session will expire in %d seconds"), timeout)
-            self.session_deadline = time.time() + timeout
+            # Give ourselves a few seconds to refresh before timing out
+            self.session_timeout = timeout - 5
+            self.session_deadline = time.time() + self.session_timeout
         else:
             attributes = imdata[0]['error']['attributes']
         return attributes

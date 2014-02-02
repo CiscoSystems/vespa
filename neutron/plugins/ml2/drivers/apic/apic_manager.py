@@ -16,14 +16,12 @@
 # @author: Arvind Somya (asomya@cisco.com), Cisco Systems Inc.
 
 import itertools
-import sqlalchemy as sa
 import uuid
 
 from oslo.config import cfg
 
-from neutron.db import api as db_api
-from neutron.db import model_base
 from neutron.plugins.ml2.drivers.apic import apic_client
+from neutron.plugins.ml2.drivers.apic import apic_model
 from neutron.plugins.ml2.drivers.apic import config
 
 AP_NAME = 'openstack'
@@ -40,43 +38,13 @@ def group_by_ranges(i):
         yield b[0][1], b[-1][1]
 
 
-class NetworkEPG(model_base.BASEV2):
-    """EPG's created on the apic per network."""
-
-    __tablename__ = 'ml2_apic_epgs'
-
-    network_id = sa.Column(sa.String(64), nullable=False,
-                           primary_key=True)
-    epg_id = sa.Column(sa.String(64), nullable=False)
-    segmentation_id = sa.Column(sa.String(64), nullable=False)
-    provider = sa.Column(sa.Boolean, default=False)
-
-
-class PortProfile(model_base.BASEV2):
-    """Port profiles created on the APIC."""
-
-    __tablename__ = 'ml2_apic_port_profiles'
-
-    node_id = sa.Column(sa.String(64), nullable=False, primary_key=True)
-    profile_id = sa.Column(sa.String(64), nullable=False)
-    hpselc_id = sa.Column(sa.String(64), nullable=False)
-    module = sa.Column(sa.String(10), nullable=False)
-    from_port = sa.Column(sa.Integer(10), nullable=False)
-    to_port = sa.Column(sa.Integer(10), nullable=False)
-
-
-class TenantContract(model_base.BASEV2):
-    __tablename__ = 'ml2_apic_contracts'
-
-    tenant_id = sa.Column(sa.String(64), nullable=False, primary_key=True)
-    contract_id = sa.Column(sa.String(64), nullable=False)
-    filter_id = sa.Column(sa.String(64), nullable=False)
-
-
 class APICManager(object):
     def __init__(self):
+        self.db = apic_model.ApicDbModel()
+
         config.ML2MechApicConfig()
         self.switch_dict = config.ML2MechApicConfig.switch_dict
+
         # Connect to the the APIC
         host = cfg.CONF.ml2_apic.apic_host
         port = cfg.CONF.ml2_apic.apic_port
@@ -98,47 +66,14 @@ class APICManager(object):
         self.entity_profile = None
         self.function_profile = None
 
-    @staticmethod
-    def get_port_profile_for_node(node_id):
-        session = db_api.get_session()
-        return session.query(PortProfile).filter_by(node_id=node_id).first()
-
-    @staticmethod
-    def get_profile_for_module_and_ports(node_id, profile_id,
-                                         module, from_port, to_port):
-        session = db_api.get_session()
-        return session.query(PortProfile).filter_by(node_id=node_id,
-                                                    module=module,
-                                                    profile_id=profile_id,
-                                                    from_port=from_port,
-                                                    to_port=to_port).first()
-
-    @staticmethod
-    def get_profile_for_module(node_id, profile_id, module):
-        session = db_api.get_session()
-        return session.query(PortProfile).filter_by(node_id=node_id,
-                                                    profile_id=profile_id,
-                                                    module=module).first()
-
-    @staticmethod
-    def add_profile_for_module_and_ports(node_id, profile_id, hpselc_id,
-                                         module, from_port, to_port):
-        session = db_api.get_session()
-        row = PortProfile(node_id=node_id, profile_id=profile_id,
-                          hpselc_id=hpselc_id, module=module,
-                          from_port=from_port, to_port=to_port)
-        session.add(row)
-        session.flush()
-
     def ensure_infra_created_on_apic(self):
         # Loop over switches
-        for switch in self.switch_dict.keys():
+        for switch in self.switch_dict:
             # Create a node profile for this switch
             self.ensure_node_profile_created_for_switch(switch)
 
             # Check if a port profile exists for this node
-            sprofile = self.get_port_profile_for_node(switch)
-            ppname = None
+            sprofile = self.db.get_port_profile_for_node(switch)
             if not sprofile:
                 # Generate uuid for port profile name
                 ppname = uuid.uuid4()
@@ -151,7 +86,7 @@ class APICManager(object):
                 ppname = sprofile.profile_id
 
             # Gather port ranges for this switch
-            ports = self.switch_dict[switch].keys()
+            ports = self.switch_dict[switch]
             # Gather common modules
             modules = {}
             for port in ports:
@@ -161,7 +96,8 @@ class APICManager(object):
                 modules[module].append(int(sw_port))
             # Sort modules and convert to ranges if possible
             for module in modules:
-                profile = self.get_profile_for_module(switch, ppname, module)
+                profile = self.db.get_profile_for_module(switch, ppname,
+                                                         module)
                 if not profile:
                     # Create host port selector for this module
                     hname = uuid.uuid4()
@@ -178,7 +114,7 @@ class APICManager(object):
                 # Add this module and ports to the profile
                 for prange in ranges:
                     # Check if this port block is already added to the profile
-                    if not self.get_profile_for_module_and_ports(
+                    if not self.db.get_profile_for_module_and_ports(
                             switch, ppname, module, prange[0], prange[-1]):
                         # Create port block for this port range
                         pbname = uuid.uuid4()
@@ -188,11 +124,9 @@ class APICManager(object):
                                                       fromPort=str(prange[0]),
                                                       toPort=str(prange[-1]))
                         # Add DB row
-                        self.add_profile_for_module_and_ports(switch,
-                                                              ppname, hname,
-                                                              module,
-                                                              prange[0],
-                                                              prange[-1])
+                        self.db.add_profile_for_module_and_ports(
+                            switch, ppname, hname, module,
+                            prange[0], prange[-1])
 
     def ensure_entity_profile_created_on_apic(self, name):
         self.entity_profile = self.apic.infraAttEntityP.get(name)
@@ -324,9 +258,7 @@ class APICManager(object):
 
     def ensure_epg_created_for_network(self, tenant_id, network_id):
         # Check if an EPG is already present for this network
-        session = db_api.get_session()
-        epg = session.query(NetworkEPG).filter_by(
-            network_id=network_id).first()
+        epg = self.db.get_epg_for_network(network_id)
         if epg:
             return epg
 
@@ -350,66 +282,22 @@ class APICManager(object):
         # Get EPG to read the segmentation id
         self.apic.fvAEPg.get(tenant_id, AP_NAME, epg_uid)
 
-        # Stick it in the DB, TEMP use a dummy seg id
-        epg = NetworkEPG(network_id=network_id, epg_id=epg_uid,
-                         segmentation_id='1')
-        session.add(epg)
-        session.flush()
+        # Stick it in the DB
+        # TODO(asomya): use the real segmentation id
+        epg = self.db.write_epg_for_network(network_id, epg_uid,
+                                            segmentation_id='1')
         return epg
 
     def delete_epg_for_network(self, tenant_id, network_id):
         # Check if an EPG is already present for this network
-        session = db_api.get_session()
-        epg = session.query(NetworkEPG).filter_by(
-            network_id=network_id).first()
+        epg = self.db.get_epg_for_network(network_id)
         if not epg:
             return False
 
         # Delete this epg
         self.apic.fvAEPg.delete(tenant_id, AP_NAME, epg.epg_id)
         # Remove DB row
-        session.delete(epg)
-        session.flush()
-
-    def get_provider_contract(self):
-        session = db_api.get_session()
-        epg = session.query(NetworkEPG).filter_by(
-            provider=True).first()
-        if epg:
-            return True
-
-        return False
-
-    def set_provider_contract(self, epg_id):
-        session = db_api.get_session()
-        epg = session.query(NetworkEPG).filter_by(
-            epg_id=epg_id).first()
-        if epg:
-            epg.provider = True
-            session.merge(epg)
-            session.flush()
-            return epg
-
-        return False
-
-    def unset_provider_contract(self, epg_id):
-        session = db_api.get_session()
-        epg = session.query(NetworkEPG).filter_by(
-            epg_id=epg_id).first()
-        if epg:
-            epg.provider = False
-            session.merge(epg)
-            session.flush()
-            return epg
-
-        return False
-
-    def get_an_epg(self, exception):
-        session = db_api.get_session()
-        epg = session.query(NetworkEPG).filter(
-            NetworkEPG.epg_id != exception).first()
-        if epg:
-            return epg
+        self.db.delete_epg(epg)
 
     def create_tenant_filter(self, tenant_id):
         fuuid = uuid.uuid4()
@@ -425,7 +313,7 @@ class APICManager(object):
                              contract_id, provider=False):
         if provider:
             self.apic.fvRsProv.create(tenant_id, AP_NAME, epg_id, contract_id)
-            self.set_provider_contract(epg_id)
+            self.db.set_provider_contract(epg_id)
         else:
             self.apic.fvRsCons.create(tenant_id, AP_NAME, epg_id, contract_id)
 
@@ -433,9 +321,9 @@ class APICManager(object):
                                 contract_id, provider=False):
         if provider:
             self.apic.fvRsProv.delete(tenant_id, AP_NAME, epg_id, contract_id)
-            self.unset_provider_contract(epg_id)
+            self.db.unset_provider_contract(epg_id)
             # Pick out another EPG to set as contract provider
-            epg = self.get_an_epg(epg_id)
+            epg = self.db.get_an_epg(epg_id)
             self.update_contract_for_epg(tenant_id, epg.epg_id,
                                          contract_id, True)
         else:
@@ -447,14 +335,11 @@ class APICManager(object):
         self.set_contract_for_epg(tenant_id, epg_id, contract_id, provider)
 
     def create_tenant_contract(self, tenant_id):
-        session = db_api.get_session()
-        contract = session.query(TenantContract).filter_by(
-            tenant_id=tenant_id).first()
+        contract = self.db.get_contract_for_tenant(tenant_id)
         if not contract:
             cuuid = uuid.uuid4()
             # Create contract
-            contract = self.apic.vzBrCP.create(tenant_id, cuuid,
-                                               scope='tenant')
+            self.apic.vzBrCP.create(tenant_id, cuuid, scope='tenant')
             # Create subject
             suuid = uuid.uuid4()
             self.apic.vzSubj.create(tenant_id, cuuid, suuid)
@@ -466,19 +351,10 @@ class APICManager(object):
             self.apic.vzOutTerm.create(tenant_id, cuuid, suuid)
             self.apic.vzRsFiltAtt__Out.create(tenant_id, cuuid, suuid, tfilter)
             # Store contract in DB
-            contract = TenantContract(tenant_id=tenant_id,
-                                      contract_id=cuuid,
-                                      filter_id=tfilter)
-            session.add(contract)
-            session.flush()
+            contract = self.db.write_contract_for_tenant(tenant_id,
+                                                         cuuid, tfilter)
 
         return contract
-
-    def _get_switch_and_port_for_host(self, host_id):
-        for switch in self.switch_dict.keys():
-            for port in self.switch_dict[switch].keys():
-                if host_id in self.switch_dict[switch][port]:
-                    return switch, port
 
     def ensure_path_created_for_port(self, tenant_id, network_id,
                                      host_id, encap):
@@ -487,7 +363,7 @@ class APICManager(object):
         eid = epg.epg_id
 
         # Get attached switch and port for this host
-        switch, port = self._get_switch_and_port_for_host(host_id)
+        switch, port = config.get_switch_and_port_for_host(host_id)
         pdn = 'topology/pod-1/paths-%s/pathep-[eth%s]' % (switch, port)
 
         # Check if exists

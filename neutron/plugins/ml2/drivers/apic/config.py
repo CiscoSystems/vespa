@@ -47,6 +47,14 @@ apic_opts = [
 cfg.CONF.register_opts(apic_opts, "ml2_apic")
 
 
+def get_switch_and_port_for_host(host_id):
+    switch_dict = ML2MechApicConfig.switch_dict
+    for switch in switch_dict:
+        for port in switch_dict[switch]:
+            if host_id in switch_dict[switch][port]:
+                return switch, port
+
+
 class ML2MechApicConfig(object):
     switch_dict = {}
 

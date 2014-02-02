@@ -21,7 +21,7 @@ from neutron.db import extraroute_db
 from neutron.db import l3_gwmode_db
 from neutron.db import model_base
 from neutron.plugins.common import constants
-from neutron.plugins.ml2.drivers.apic.apic_manager import APICManager
+from neutron.plugins.ml2.drivers.apic import apic_manager
 
 
 class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
@@ -32,14 +32,16 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
 
     def __init__(self):
         qdbapi.register_models(base=model_base.BASEV2)
-        self.manager = APICManager()
+        self.manager = apic_manager.APICManager()
 
-    def get_plugin_type(self):
+    @staticmethod
+    def get_plugin_type():
         return constants.L3_ROUTER_NAT
 
-    def get_plugin_description(self):
+    @staticmethod
+    def get_plugin_description():
         """returns string description of the plugin."""
-        return ("L3 Router Service Plugin for basic L3 using the APIC")
+        return _("L3 Router Service Plugin for basic L3 using the APIC")
 
     def add_router_interface(self, context, router_id, interface_info):
         tenant_id = context.tenant_id
@@ -55,7 +57,7 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         # Check for a provider EPG
         epg = self.manager.ensure_epg_created_for_network(tenant_id,
                                                           network_id)
-        if self.manager.get_provider_contract():
+        if self.manager.db.get_provider_contract():
             # Set this network's EPG as a consumer
             self.manager.set_contract_for_epg(tenant_id, epg.epg_id,
                                               contract.contract_id)
