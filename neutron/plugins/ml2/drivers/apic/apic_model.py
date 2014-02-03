@@ -149,3 +149,5 @@ class ApicDbModel(object):
                                   filter_id=filter_id)
         self.session.add(contract)
         self.session.flush()
+
+        return contract

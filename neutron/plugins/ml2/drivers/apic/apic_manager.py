@@ -314,6 +314,7 @@ class APICManager(object):
         if provider:
             self.apic.fvRsProv.create(tenant_id, AP_NAME, epg_id, contract_id)
             self.db.set_provider_contract(epg_id)
+            self.make_tenant_contract_global(tenant_id)
         else:
             self.apic.fvRsCons.create(tenant_id, AP_NAME, epg_id, contract_id)
 
@@ -340,6 +341,7 @@ class APICManager(object):
             cuuid = uuid.uuid4()
             # Create contract
             self.apic.vzBrCP.create(tenant_id, cuuid, scope='tenant')
+            acontract = self.apic.vzBrCP.get(tenant_id, cuuid)
             # Create subject
             suuid = uuid.uuid4()
             self.apic.vzSubj.create(tenant_id, cuuid, suuid)
@@ -350,11 +352,20 @@ class APICManager(object):
             self.apic.vzRsFiltAtt__In.create(tenant_id, cuuid, suuid, tfilter)
             self.apic.vzOutTerm.create(tenant_id, cuuid, suuid)
             self.apic.vzRsFiltAtt__Out.create(tenant_id, cuuid, suuid, tfilter)
+            # Create contract interface
+            iuuid = uuid.uuid4()
+            self.apic.vzCPIf.create(tenant_id, iuuid)
+            self.apic.vzRsIf.create(tenant_id, iuuid, tDn=acontract['dn'])
             # Store contract in DB
             contract = self.db.write_contract_for_tenant(tenant_id,
                                                          cuuid, tfilter)
 
         return contract
+
+    def make_tenant_contract_global(self, tenant_id):
+        contract = self.db.get_contract_for_tenant(tenant_id)
+        self.apic.vzBrCP.update(tenant_id, contract.contract_id,
+                                scope='global')
 
     def ensure_path_created_for_port(self, tenant_id, network_id,
                                      host_id, encap):
