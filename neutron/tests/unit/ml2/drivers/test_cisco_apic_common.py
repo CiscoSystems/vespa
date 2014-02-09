@@ -133,9 +133,9 @@ class ControllerMixin(object):
         # Recursively generate responses for creating obj's containers.
         if obj:
             mo = apic.MoClass(obj)
-            if mo.container:
-                self._mock_container_responses_for_create(mo.container)
             if mo.can_create:
+                if mo.container:
+                    self._mock_container_responses_for_create(mo.container)
                 name = '-'.join([obj, 'name'])  # useful for debugging
                 self._stage_mocked_response('post', OK, obj, name=name)
 

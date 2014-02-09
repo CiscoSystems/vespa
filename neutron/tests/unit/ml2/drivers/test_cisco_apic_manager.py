@@ -16,6 +16,9 @@
 # @author: Henry Gessau, Cisco Systems
 
 import mock
+import uuid
+
+from neutron.openstack.common import uuidutils
 
 from neutron.common import log
 from neutron.plugins.ml2.drivers.apic import apic_manager
@@ -436,3 +439,111 @@ class TestCiscoApicManager(base.BaseTestCase,
                                               'static')
         # TODO(Henry): the above breaks for an unknown host
         self.assert_responses_drained()
+
+    def test_search_for_epg_with_net_and_secgroups(self):
+        nid = mocked.APIC_NETWORK
+        sg = mocked.APIC_CONTRACT
+        self.mgr.apic_epgs = []
+        self.mgr.search_for_epg_with_net_and_secgroups(nid, [sg])
+        self.mgr.apic_epgs = ['other']
+        self.mgr.search_for_epg_with_net_and_secgroups(nid, [sg])
+        self.mgr.apic_epgs = [nid]
+        self.mgr.search_for_epg_with_net_and_secgroups(nid, [sg])
+        self.mgr.apic_epgs = [sg]
+        self.mgr.search_for_epg_with_net_and_secgroups(nid, [sg])
+        # TODO(Henry): this method is currently a stub
+
+    def test_create_epg_with_net_and_secgroups(self):
+        nid = mocked.APIC_NETWORK
+        sg = mocked.APIC_CONTRACT
+        self.mgr.create_epg_with_net_and_secgroups(nid, [sg])
+        # TODO(Henry): this method is currently a stub
+
+    def test_create_tenant_filter(self):
+        tenant = mocked.APIC_TENANT
+        self.mock_responses_for_create('vzFilter')
+        self.mock_responses_for_create('vzEntry')
+        filter_id = self.mgr.create_tenant_filter(tenant)
+        self.assert_responses_drained()
+        self.assertTrue(uuidutils.is_uuid_like(str(filter_id)))
+
+    def test_set_contract_for_epg_consumer(self):
+        tenant = mocked.APIC_TENANT
+        epg = mocked.APIC_EPG
+        contract = mocked.APIC_CONTRACT
+        self.mock_responses_for_create('fvRsCons')
+        self.mgr.set_contract_for_epg(tenant, epg, contract)
+        self.assert_responses_drained()
+
+    def test_set_contract_for_epg_provider(self):
+        tenant = mocked.APIC_TENANT
+        epg = mocked.APIC_EPG
+        contract = mocked.APIC_CONTRACT
+        epg_obj = mock.Mock()
+        epg_obj.epg_id = epg
+        epg_obj.provider = False
+        self.mock_db_query_filterby_first_return(epg_obj)
+        self.mock_responses_for_create('fvRsProv')
+        self.mock_response_for_post('vzBrCP')
+        self.mgr.set_contract_for_epg(tenant, epg, contract, provider=True)
+        self.assert_responses_drained()
+        self.assertTrue(self.mocked_session.merge.called)
+        self.assertTrue(self.mocked_session.flush.called)
+        self.assertTrue(epg_obj.provider)
+        # TODO(Henry): db.set_provider_contract can return False
+
+    def test_delete_contract_for_epg_consumer(self):
+        tenant = mocked.APIC_TENANT
+        epg = mocked.APIC_EPG
+        contract = mocked.APIC_CONTRACT
+        self.mock_response_for_post('fvRsCons')
+        self.mgr.delete_contract_for_epg(tenant, epg, contract)
+        self.assert_responses_drained()
+
+    def test_delete_contract_for_epg_provider(self):
+        tenant = mocked.APIC_TENANT
+        epg = mocked.APIC_EPG
+        contract = mocked.APIC_CONTRACT
+        epg_obj = mock.Mock()
+        epg_obj.epg_id = epg + '-other'
+        epg_obj.provider = False
+        self.mock_db_query_filterby_first_return(epg_obj)
+        self.mock_response_for_post('fvRsProv')
+        self.mock_response_for_post('fvRsCons')
+        self.mock_responses_for_create('fvRsProv')
+        self.mock_response_for_post('vzBrCP')
+        self.mgr.delete_contract_for_epg(tenant, epg, contract, provider=True)
+        self.assert_responses_drained()
+        self.assertTrue(self.mocked_session.merge.called)
+        self.assertTrue(self.mocked_session.flush.called)
+        self.assertTrue(epg_obj.provider)
+        # TODO(Henry): db.unset_provider_contract can return False
+
+    def test_create_tenant_contract_existing(self):
+        tenant = mocked.APIC_TENANT
+        contract = mocked.APIC_CONTRACT
+        self.mock_db_query_filterby_first_return(contract)
+        new_contract = self.mgr.create_tenant_contract(tenant)
+        self.assertEqual(new_contract, contract)
+
+    def test_create_tenant_contract_new(self):
+        tenant = mocked.APIC_TENANT
+        contract = mocked.APIC_CONTRACT
+        dn = self.mgr.apic.vzBrCP.mo.dn(tenant, contract)
+        self.mock_db_query_filterby_first_return(None)
+        self.mock_responses_for_create('vzBrCP')
+        self.mock_response_for_get('vzBrCP', dn=dn)
+        self.mock_responses_for_create('vzSubj')
+        self.mock_responses_for_create('vzFilter')
+        self.mock_responses_for_create('vzEntry')
+        self.mock_responses_for_create('vzInTerm')
+        self.mock_responses_for_create('vzRsFiltAtt__In')
+        self.mock_responses_for_create('vzOutTerm')
+        self.mock_responses_for_create('vzRsFiltAtt__Out')
+        self.mock_responses_for_create('vzCPIf')
+        self.mock_responses_for_create('vzRsIf')
+        new_contract = self.mgr.create_tenant_contract(tenant)
+        self.assert_responses_drained()
+        self.assertTrue(self.mocked_session.add.called)
+        self.assertTrue(self.mocked_session.flush.called)
+        self.assertEqual(new_contract['tenant_id'], tenant)
