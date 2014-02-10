@@ -67,6 +67,7 @@ class APICMechanismDriver(api.MechanismDriver):
 
         # Get network
         network = context.network.current['id']
+        net_name = context.network.current['name']
         # Get segmentation id
         seg = context.network.current['provider:segmentation_id']
 
@@ -80,18 +81,17 @@ class APICMechanismDriver(api.MechanismDriver):
 
         # Create a static path attachment for this host/epg/switchport combo
         self.apic_manager.ensure_path_created_for_port(tenant_id, network,
-                                                       host, seg)
+                                                       host, seg, net_name)
 
     def create_network_precommit(self, context):
         net_id = context.current['id']
         tenant_id = context.current['tenant_id']
+        net_name = context.current['name']
 
         self.apic_manager.ensure_bd_created_on_apic(tenant_id, net_id)
         # Create EPG for this network
-        self.apic_manager.ensure_epg_created_for_network(tenant_id, net_id)
-
-    def create_network_postcommit(self, context):
-        pass
+        self.apic_manager.ensure_epg_created_for_network(tenant_id, net_id,
+                                                         net_name)
 
     def delete_network_precommit(self, context):
         net_id = context.current['id']
@@ -135,16 +135,9 @@ class APICMechanismDriver(api.MechanismDriver):
 
     @staticmethod
     def check_segment(segment):
-        """Verify a segment is valid for the OpenDaylight MechanismDriver
-
-        Verify the requested segment is supported by ODL and return True or
-        False to indicate this to callers.
-        """
+        """Verify a segment is valid for the APIC Mechanism driver."""
         network_type = segment[api.NETWORK_TYPE]
-        if network_type in [constants.TYPE_LOCAL, constants.TYPE_FLAT,
-                            constants.TYPE_VLAN, constants.TYPE_GRE,
-                            constants.TYPE_VXLAN]:
-            #TODO(mestery): Validate these
+        if network_type in [constants.TYPE_VLAN]:
             return True
         else:
             return False

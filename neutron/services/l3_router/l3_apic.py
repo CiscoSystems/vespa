@@ -50,13 +50,16 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         # Get network for this subnet
         subnet = self.get_subnet(context, subnet_id)
         network_id = subnet['network_id']
+        network = self.get_network(context, network_id)
+        net_name = network['name']
 
         # Setup tenant filters and contracts
         contract = self.manager.create_tenant_contract(tenant_id)
 
         # Check for a provider EPG
         epg = self.manager.ensure_epg_created_for_network(tenant_id,
-                                                          network_id)
+                                                          network_id,
+                                                          net_name)
         if self.manager.db.get_provider_contract():
             # Set this network's EPG as a consumer
             self.manager.set_contract_for_epg(tenant_id, epg.epg_id,

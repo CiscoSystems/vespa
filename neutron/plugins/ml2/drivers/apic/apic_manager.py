@@ -211,7 +211,7 @@ class APICManager(object):
         Check the local tenant cache and create a new tenant
         if not found
         """
-        if tenant_id not in self.apic_tenants:
+        if not self.apic.fvTenant.get(tenant_id):
             self.apic.fvTenant.create(tenant_id)
             self.apic_tenants.append(tenant_id)
 
@@ -256,14 +256,14 @@ class APICManager(object):
                                           security_groups):
         pass
 
-    def ensure_epg_created_for_network(self, tenant_id, network_id):
+    def ensure_epg_created_for_network(self, tenant_id, network_id, net_name):
         # Check if an EPG is already present for this network
         epg = self.db.get_epg_for_network(network_id)
         if epg:
             return epg
 
         # Create a new EPG on the APIC
-        epg_uid = str(uuid.uuid4())
+        epg_uid = '-'.join([str(net_name), str(uuid.uuid4())])
         self.apic.fvAEPg.create(tenant_id, AP_NAME, epg_uid)
 
         # Add bd to EPG
@@ -368,9 +368,10 @@ class APICManager(object):
                                 scope='global')
 
     def ensure_path_created_for_port(self, tenant_id, network_id,
-                                     host_id, encap):
+                                     host_id, encap, net_name):
         encap = 'vlan-' + str(encap)
-        epg = self.ensure_epg_created_for_network(tenant_id, network_id)
+        epg = self.ensure_epg_created_for_network(tenant_id, network_id,
+                                                  net_name)
         eid = epg.epg_id
 
         # Get attached switch and port for this host
