@@ -16,7 +16,6 @@
 # @author: Henry Gessau, Cisco Systems
 
 import mock
-import uuid
 
 from neutron.openstack.common import uuidutils
 
@@ -40,43 +39,18 @@ class TestCiscoApicManager(base.BaseTestCase,
         mocked.ConfigMixin.set_up_mocks(self)
         mocked.DbModelMixin.set_up_mocks(self)
 
-        # Tests are based on authenticated session, so log in here
-        self.mock_response_for_post('aaaLogin', userName=mocked.APIC_USR,
-                                   token='ok', refreshTimeoutSeconds=300)
-        # After login, the manager gets lists of objects ...
-        mos = ['fvTenant', 'fvBD', 'fvSubnet', 'fvAp', 'fvAEPg', 'vzFilter']
-        for mo in mos:
-            name1 = mo[2:].lower() + '1'
-            name2 = name1[:-1] + '2'
-            self.mock_response_for_get(mo, name=name1)
-            self.mock_append_to_response(mo, name=name2)
-
+        self.mock_apic_manager_login_responses()
         self.mgr = apic_manager.APICManager()
         self.reset_reponses()
 
         self.addCleanup(mock.patch.stopall)
-
-    def assert_responses_drained(self, req=None):
-        """Fail if all the expected responses have not been consumed."""
-        request = {'post': self.mgr.apic.session.post,
-                   'get': self.mgr.apic.session.get}
-        reqs = req and [req] or ['post', 'get']  # Both if none specified.
-        for req in reqs:
-            try:
-                request[req]('some url')
-            except StopIteration:
-                pass
-            else:
-                # User-friendly error message
-                msg = req + ' response queue not drained'
-                self.fail(msg=msg)
 
     def test_mgr_session_login(self):
         login = self.mgr.apic.authentication
         self.assertEqual(login['userName'], mocked.APIC_USR)
 
     def test_mgr_session_logout(self):
-        self.mock_response_for_post('aaaLogout', userName=mocked.APIC_USR)
+        self.mock_response_for_post('aaaLogout')
         self.mgr.apic.logout()
         self.assertIsNone(self.mgr.apic.authentication)
 
@@ -112,7 +86,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         old_switch = mocked.APIC_NODE_PROF
         self.mock_response_for_get('infraNodeP', name=old_switch)
         self.mgr.ensure_node_profile_created_for_switch(old_switch)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         old_name = self.mgr.node_profiles[old_switch]['object']['name']
         self.assertEqual(old_name, old_switch)
 
@@ -124,7 +98,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         self.mock_responses_for_create('infraNodeBlk')
         self.mock_response_for_get('infraNodeP', name=new_switch)
         self.mgr.ensure_node_profile_created_for_switch(new_switch)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         new_name = self.mgr.node_profiles[new_switch]['object']['name']
         self.assertEqual(new_name, new_switch)
 
@@ -132,46 +106,43 @@ class TestCiscoApicManager(base.BaseTestCase,
         dom = mocked.APIC_DOMAIN
         self.mock_response_for_get('vmmDomP', name=dom)
         self.mgr.ensure_vmm_domain_created_on_apic(dom)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         old_dom = self.mgr.vmm_domain['name']
         self.assertEqual(old_dom, dom)
 
-    def _mock_new_dom_responses(self, dom):
+    def _mock_new_dom_responses(self, dom, seg_type=None):
         vmm = mocked.APIC_VMMP
         dn = self.mgr.apic.vmmDomP.mo.dn(vmm, dom)
         self.mock_response_for_get('vmmDomP')
         self.mock_responses_for_create('vmmDomP')
+        if seg_type:
+            self.mock_responses_for_create(seg_type)
         self.mock_response_for_get('vmmDomP', name=dom, dn=dn)
 
     def test_ensure_vmm_domain_created_new_no_vlan_ns(self):
         dom = mocked.APIC_DOMAIN
         self._mock_new_dom_responses(dom)
         self.mgr.ensure_vmm_domain_created_on_apic(dom)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         new_dom = self.mgr.vmm_domain['name']
         self.assertEqual(new_dom, dom)
 
-    def _mock_new_vlan_ns_responses(self, ns_dn):
-        self.mock_responses_for_create('vmmDomP')
-        self.mock_response_for_post('infraRsVlanNs', tDn=ns_dn)
-
     def test_ensure_vmm_domain_created_new_with_vlan_ns(self):
         dom = mocked.APIC_DOMAIN
-        self._mock_new_dom_responses(dom)
+        self._mock_new_dom_responses(dom, seg_type='infraRsVlanNs')
         ns = {'dn': 'test_vlan_ns'}
-        self._mock_new_vlan_ns_responses(ns['dn'])
         self.mgr.ensure_vmm_domain_created_on_apic(dom, vlan_ns=ns)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         new_dom = self.mgr.vmm_domain['name']
         self.assertEqual(new_dom, dom)
 
     def test_ensure_vmm_domain_created_new_with_vxlan_ns(self):
         dom = mocked.APIC_DOMAIN
-        self._mock_new_dom_responses(dom)
+        # TODO(Henry): mock seg_type creation
+        self._mock_new_dom_responses(dom, seg_type=None)
         ns = {'dn': 'test_vxlan_ns'}
-        # TODO(Henry): self._mock_new_vlan_ns_responses(ns['dn'])
         self.mgr.ensure_vmm_domain_created_on_apic(dom, vxlan_ns=ns)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         new_dom = self.mgr.vmm_domain['name']
         self.assertEqual(new_dom, dom)
 
@@ -180,6 +151,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         self.mgr.ensure_infra_created_on_apic()
 
     def test_ensure_infra_created_seq1(self):
+        # TODO(Henry): use patch()es
         self.mgr.ensure_node_profile_created_for_switch = mock.Mock()
         self.mgr.db.get_port_profile_for_node = mock.Mock(
             return_value=None)
@@ -204,9 +176,10 @@ class TestCiscoApicManager(base.BaseTestCase,
             self.mock_responses_for_create('infraPortBlk')
 
         self.mgr.ensure_infra_created_on_apic()
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
 
     def test_ensure_infra_created_seq2(self):
+        # TODO(Henry): use patch()es
         self.mgr.ensure_node_profile_created_for_switch = mock.Mock()
 
         def _profile_for_node(switch):
@@ -228,7 +201,7 @@ class TestCiscoApicManager(base.BaseTestCase,
             self.mock_responses_for_create('infraRsAccBaseGrp')
 
         self.mgr.ensure_infra_created_on_apic()
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
 
     def _mock_vmm_dom_prereq(self, dom):
         self._mock_new_dom_responses(dom)
@@ -238,7 +211,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         ep = mocked.APIC_ATT_ENT_PROF
         self.mock_response_for_get('infraAttEntityP', name=ep)
         self.mgr.ensure_entity_profile_created_on_apic(ep)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
 
     def _mock_new_entity_profile(self):
         self.mock_response_for_get('infraAttEntityP')
@@ -251,7 +224,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         ep = mocked.APIC_ATT_ENT_PROF
         self._mock_new_entity_profile()
         self.mgr.ensure_entity_profile_created_on_apic(ep)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
 
     def _mock_entity_profile_preqreq(self):
         self._mock_vmm_dom_prereq(mocked.APIC_DOMAIN)
@@ -264,7 +237,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         fp = mocked.APIC_FUNC_PROF
         self.mock_response_for_get('infraAccPortGrp', name=fp)
         self.mgr.ensure_function_profile_created_on_apic(fp)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         old_fp = self.mgr.function_profile['name']
         self.assertEqual(old_fp, fp)
 
@@ -284,7 +257,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         self.mock_responses_for_create('infraRsAttEntP')
         self.mock_response_for_get('infraAccPortGrp', name=fp, dn=dn)
         self.mgr.ensure_function_profile_created_on_apic(fp)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         new_fp = self.mgr.function_profile['name']
         self.assertEqual(new_fp, fp)
 
@@ -293,7 +266,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         mode = mocked.APIC_VLAN_MODE
         self.mock_response_for_get('fvnsVlanInstP', name=ns, mode=mode)
         old_ns = self.mgr.ensure_vlan_ns_created_on_apic(ns, '100', '199')
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         self.assertEqual(old_ns['name'], ns)
 
     def _mock_new_vlan_instance(self, ns, vlan_encap=None):
@@ -310,7 +283,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         self.mock_response_for_get('fvnsVlanInstP')
         self._mock_new_vlan_instance(ns)
         new_ns = self.mgr.ensure_vlan_ns_created_on_apic(ns, '200', '299')
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         self.assertEqual(new_ns['name'], ns)
 
     def test_ensure_vlan_ns_created_new_with_encap(self):
@@ -319,56 +292,52 @@ class TestCiscoApicManager(base.BaseTestCase,
         ns_args = {'name': 'encap', 'from': '300', 'to': '399'}
         self._mock_new_vlan_instance(ns, vlan_encap=ns_args)
         new_ns = self.mgr.ensure_vlan_ns_created_on_apic(ns, '300', '399')
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         self.assertEqual(new_ns['name'], ns)
 
     def test_ensure_tenant_created_on_apic(self):
+        self.mock_response_for_get('fvTenant', name='any')
         self.mgr.apic_tenants = ['one', 'two', 'three']
         self.mgr.ensure_tenant_created_on_apic('two')
-        self.mock_response_for_post('fvTenant', name='four')
+        self.mock_response_for_get('fvTenant')
+        self.mock_responses_for_create('fvTenant')
         self.mgr.ensure_tenant_created_on_apic('four')
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         self.assertEqual(self.mgr.apic_tenants,
                          ['one', 'two', 'three', 'four'])
 
     def test_ensure_bd_created(self):
         self.mgr.apic_bridge_domains = ['one', 'two', 'three']
         self.mgr.ensure_bd_created_on_apic('t1', 'two')
-        self.mock_response_for_post('fvTenant', name='t2')
-        self.mock_response_for_post('fvBD', name='four')
-        self.mock_response_for_post('fvTenant', name='t2')
-        self.mock_response_for_post('fvBD', name='four')
-        self.mock_response_for_post('fvRsCtx', name='ctx')
+        self.mock_responses_for_create('fvBD')
+        self.mock_responses_for_create('fvRsCtx')
         self.mgr.ensure_bd_created_on_apic('t2', 'four')
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         self.assertEqual(self.mgr.apic_bridge_domains,
                          ['one', 'two', 'three', 'four'])
 
     def test_delete_bd(self):
         self.mock_response_for_post('fvBD')
         self.mgr.delete_bd_on_apic('t1', 'bd')
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         # Just coverage, nothing to verify.
         # TODO(Henry): should mgr.apic_bridge_domains be updated?
 
     def test_ensure_subnet_created(self):
         self.mgr.apic_subnets = ['one', 'two', 'three']
         self.mgr.ensure_subnet_created_on_apic('t0', 'bd1', 'two', '2.2.2.2')
-        self.mock_response_for_post('fvTenant', name='t2')
-        self.mock_response_for_post('fvBD', name='bd3')
-        self.mock_response_for_post('fvSubnet', name='four')
+        self.mock_responses_for_create('fvSubnet')
         self.mgr.ensure_subnet_created_on_apic('t2', 'bd3', 'four', '4.4.4.4')
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         self.assertEqual(self.mgr.apic_subnets,
                          ['one', 'two', 'three', 'four'])
 
     def test_ensure_filter_created(self):
         self.mgr.apic_filters = ['one', 'two', 'three']
         self.mgr.ensure_filter_created_on_apic('t1', 'two')
-        self.mock_response_for_post('fvTenant', name='t2')
-        self.mock_response_for_post('vzFilter', name='four')
+        self.mock_responses_for_create('vzFilter')
         self.mgr.ensure_filter_created_on_apic('t2', 'four')
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         self.assertEqual(self.mgr.apic_filters,
                          ['one', 'two', 'three', 'four'])
 
@@ -376,17 +345,18 @@ class TestCiscoApicManager(base.BaseTestCase,
         self.mock_response_for_get('fvAEPg', name='one')
         self.mock_append_to_response('fvAEPg', name='two')
         self.mgr.get_epg_list_from_apic()
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         self.assertEqual(self.mgr.apic_epgs, ['one', 'two'])
 
     def test_ensure_epg_created_for_network_old(self):
         self.mock_db_query_filterby_first_return('faked')
-        epg = self.mgr.ensure_epg_created_for_network('X', 'Y')
+        epg = self.mgr.ensure_epg_created_for_network('X', 'Y', 'Z')
         self.assertEqual(epg, 'faked')
 
     def test_ensure_epg_created_for_network_new(self):
         tenant = mocked.APIC_TENANT
         network = mocked.APIC_NETWORK
+        netname = mocked.APIC_NETNAME
         epg = mocked.APIC_EPG
         dom = mocked.APIC_DOMAIN
         self.mock_db_query_filterby_first_return(None)
@@ -396,8 +366,9 @@ class TestCiscoApicManager(base.BaseTestCase,
         self.mock_response_for_get('vmmDomP', name=dom, dn='dn')
         self.mock_responses_for_create('fvRsDomAtt')
         self.mock_response_for_get('fvAEPg', name=epg)
-        new_epg = self.mgr.ensure_epg_created_for_network(tenant, network)
-        self.assert_responses_drained()
+        new_epg = self.mgr.ensure_epg_created_for_network(tenant,
+                                                          network, netname)
+        self.assert_responses_drained(self.mgr.apic.session)
         self.assertEqual(new_epg.network_id, network)
         self.assertTrue(self.mocked_session.add.called)
         self.assertTrue(self.mocked_session.flush.called)
@@ -424,9 +395,9 @@ class TestCiscoApicManager(base.BaseTestCase,
         apic_manager.APICManager.ensure_epg_created_for_network = eepg
         self.mock_response_for_get('fvRsPathAtt', tDn='foo')
         self.mgr.ensure_path_created_for_port('tenant', 'network', 'ubuntu2',
-                                              'static')
+                                              'static', 'netname')
         # TODO(Henry): the above breaks for an unknown host
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
 
     def test_ensure_path_created_for_port_no_path_att(self):
         epg = mock.Mock()
@@ -436,9 +407,9 @@ class TestCiscoApicManager(base.BaseTestCase,
         self.mock_response_for_get('fvRsPathAtt')
         self.mock_responses_for_create('fvRsPathAtt')
         self.mgr.ensure_path_created_for_port('tenant', 'network', 'ubuntu2',
-                                              'static')
+                                              'static', 'netname')
         # TODO(Henry): the above breaks for an unknown host
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
 
     def test_search_for_epg_with_net_and_secgroups(self):
         nid = mocked.APIC_NETWORK
@@ -464,7 +435,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         self.mock_responses_for_create('vzFilter')
         self.mock_responses_for_create('vzEntry')
         filter_id = self.mgr.create_tenant_filter(tenant)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         self.assertTrue(uuidutils.is_uuid_like(str(filter_id)))
 
     def test_set_contract_for_epg_consumer(self):
@@ -473,7 +444,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         contract = mocked.APIC_CONTRACT
         self.mock_responses_for_create('fvRsCons')
         self.mgr.set_contract_for_epg(tenant, epg, contract)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
 
     def test_set_contract_for_epg_provider(self):
         tenant = mocked.APIC_TENANT
@@ -486,7 +457,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         self.mock_responses_for_create('fvRsProv')
         self.mock_response_for_post('vzBrCP')
         self.mgr.set_contract_for_epg(tenant, epg, contract, provider=True)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         self.assertTrue(self.mocked_session.merge.called)
         self.assertTrue(self.mocked_session.flush.called)
         self.assertTrue(epg_obj.provider)
@@ -498,7 +469,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         contract = mocked.APIC_CONTRACT
         self.mock_response_for_post('fvRsCons')
         self.mgr.delete_contract_for_epg(tenant, epg, contract)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
 
     def test_delete_contract_for_epg_provider(self):
         tenant = mocked.APIC_TENANT
@@ -513,7 +484,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         self.mock_responses_for_create('fvRsProv')
         self.mock_response_for_post('vzBrCP')
         self.mgr.delete_contract_for_epg(tenant, epg, contract, provider=True)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         self.assertTrue(self.mocked_session.merge.called)
         self.assertTrue(self.mocked_session.flush.called)
         self.assertTrue(epg_obj.provider)
@@ -543,7 +514,7 @@ class TestCiscoApicManager(base.BaseTestCase,
         self.mock_responses_for_create('vzCPIf')
         self.mock_responses_for_create('vzRsIf')
         new_contract = self.mgr.create_tenant_contract(tenant)
-        self.assert_responses_drained()
+        self.assert_responses_drained(self.mgr.apic.session)
         self.assertTrue(self.mocked_session.add.called)
         self.assertTrue(self.mocked_session.flush.called)
         self.assertEqual(new_contract['tenant_id'], tenant)

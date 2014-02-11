@@ -36,6 +36,7 @@ APIC_PWD = 'topsecret'
 
 APIC_TENANT = 'citizen14'
 APIC_NETWORK = 'network99'
+APIC_NETNAME = 'net99name'
 APIC_SUBNET = '10.3.2.1/24'
 APIC_L3CTX = 'layer3context'
 APIC_AP = 'appProfile001'
@@ -138,6 +139,32 @@ class ControllerMixin(object):
                     self._mock_container_responses_for_create(mo.container)
                 name = '-'.join([obj, 'name'])  # useful for debugging
                 self._stage_mocked_response('post', OK, obj, name=name)
+
+    def mock_apic_manager_login_responses(self):
+        # APIC Manager tests are based on authenticated session
+        self.mock_response_for_post('aaaLogin', userName=APIC_USR,
+                                   token='ok', refreshTimeoutSeconds=300)
+        # After login, the manager gets lists of objects ...
+        mos = ['fvTenant', 'fvBD', 'fvSubnet', 'fvAp', 'fvAEPg', 'vzFilter']
+        for mo in mos:
+            name1 = mo[2:].lower() + '1'
+            name2 = name1[:-1] + '2'
+            self.mock_response_for_get(mo, name=name1)
+            self.mock_append_to_response(mo, name=name2)
+
+    def assert_responses_drained(self, session, req=None):
+        """Fail if all the expected responses have not been consumed."""
+        request = {'post': session.post, 'get': session.get}
+        reqs = req and [req] or ['post', 'get']  # Both if none specified.
+        for req in reqs:
+            try:
+                request[req]('some url')
+            except StopIteration:
+                pass
+            else:
+                # User-friendly error message
+                msg = req + ' response queue not drained'
+                self.fail(msg=msg)
 
 
 class ConfigMixin(object):
