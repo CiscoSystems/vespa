@@ -20,9 +20,9 @@ import mock
 from oslo.config import cfg
 
 from neutron.plugins.ml2.drivers.apic import mechanism_apic as md
+from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.tests import base
 from neutron.tests.unit.ml2.drivers import test_cisco_apic_common as mocked
-from neutron.plugins.ml2.drivers import type_vlan  # noqa
 
 
 HOST_ID1 = 'ubuntu'

@@ -143,7 +143,7 @@ class ControllerMixin(object):
     def mock_apic_manager_login_responses(self):
         # APIC Manager tests are based on authenticated session
         self.mock_response_for_post('aaaLogin', userName=APIC_USR,
-                                   token='ok', refreshTimeoutSeconds=300)
+                                    token='ok', refreshTimeoutSeconds=300)
         # After login, the manager gets lists of objects ...
         mos = ['fvTenant', 'fvBD', 'fvSubnet', 'fvAp', 'fvAEPg', 'vzFilter']
         for mo in mos:
@@ -234,4 +234,3 @@ class DbModelMixin(object):
         """Mock db.session.query().filterby().first() to return value."""
         query = self.mocked_session.query.return_value
         query.filter_by.return_value.first.return_value = value
-

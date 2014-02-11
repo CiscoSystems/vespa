@@ -48,7 +48,7 @@ class TestCiscoApicClient(base.BaseTestCase, mocked.ControllerMixin):
     def test_login_by_instantiation(self):
         self.reset_reponses()
         self.mock_response_for_post('aaaLogin', userName=mocked.APIC_USR,
-                                   token='X', refreshTimeoutSeconds='300')
+                                    token='X', refreshTimeoutSeconds='300')
         apic2 = apic.RestClient(mocked.APIC_HOST,
                                 usr=mocked.APIC_USR, pwd=mocked.APIC_PWD)
         self.assertIsNotNone(apic2.authentication)
@@ -115,7 +115,7 @@ class TestCiscoApicClient(base.BaseTestCase, mocked.ControllerMixin):
         self._mock_authenticate(timeout=-1)
         # Client will do refresh before getting tenant
         self.mock_response_for_get('aaaRefresh', token='ok',
-                                  refreshTimeoutSeconds=300)
+                                   refreshTimeoutSeconds=300)
         self.mock_response_for_get('fvTenant', name=mocked.APIC_TENANT)
         tenant = self.apic.fvTenant.get(mocked.APIC_TENANT)
         self.assertEqual(tenant['name'], mocked.APIC_TENANT)
@@ -135,7 +135,7 @@ class TestCiscoApicClient(base.BaseTestCase, mocked.ControllerMixin):
                                      text=u'Token was invalid. Expired.')
         # Client will then try to re-login.
         self.mock_response_for_post('aaaLogin', userName=mocked.APIC_USR,
-                                   token='ok', refreshTimeoutSeconds=300)
+                                    token='ok', refreshTimeoutSeconds=300)
         # Finally the client will try to get the tenant.
         self.mock_response_for_get('fvTenant', name=mocked.APIC_TENANT)
         tenant = self.apic.fvTenant.get(mocked.APIC_TENANT)
@@ -229,7 +229,7 @@ class TestCiscoApicClient(base.BaseTestCase, mocked.ControllerMixin):
         self._mock_authenticate()
         self.mock_response_for_post('fvTenant', name=mocked.APIC_TENANT)
         self.mock_response_for_get('fvTenant', name=mocked.APIC_TENANT,
-                                  more='extra')
+                                   more='extra')
         self.apic.fvTenant.update(mocked.APIC_TENANT, more='extra')
         tenant = self.apic.fvTenant.get(mocked.APIC_TENANT)
         self.assertEqual(tenant['name'], mocked.APIC_TENANT)
